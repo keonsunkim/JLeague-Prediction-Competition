@@ -39,7 +39,7 @@ from math import sqrt
 
 import googlemaps
 import requests
-from bs4 import BeautifulSoup as BS
+from bs4 import BeautifulSoup as bs
 # 3rd Party Packages for Web Scraping
 
 
@@ -291,22 +291,29 @@ def set_datetime(df):
 #######################################################################
 #######################################################################
 
-def add_venue_area_info(df, gmaps):
-    venues = df['venue'].dropna().unique()
-
-    venue_areas = []
-
-    for venue in venues:
-        raw_data = gmaps.geocode(address=venue, language='jp')
+def get_stadium_area_geoinfo(df, gmaps):
+    # Collect the name of the unique stadiums
+    unique_stadium = combine['stadium'].dropna().unique()
+    
+    # We're going to save the geo-info of the each stadium
+    # in this list by crwaling from google maps 
+    stadium_area_dict = {}
+    
+    for stadium in unique_stadium:
+        geo_info = gmaps.geocode(address=stadium, language='jp')
         try:
-            venue_area = raw_data[0]['formatted_address']
-            venue_areas.append(venue_area)
+            stadium_area = geo_info[0]['formatted_address']
         except:
-            print('The internet seems to be unstable try again')
-            raise IndexError
-
-    venue_area_df = pd.DataFrame(
-        data={'venue': venues, 'venue_area': venue_areas})
+            pass
+        stadium_area_dict[stadium] = stadium_area
+        
+    
+    pd.DataFrame( data    =  list( stadium_area_dict.items() ) , 
+                  columns =  ['stadium','geo_info'])
+    
+    return stadium_area_df
+    
+    ######----Done by this line------ ######
 
     def extract_area_name(row):
         pat_normal = re.compile('(\w+ *\w*) \d{3}-\d{4}')
