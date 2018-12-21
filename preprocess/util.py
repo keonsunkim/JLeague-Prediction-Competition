@@ -1,3 +1,7 @@
+from pandas.api.types import is_string_dtype, is_numeric_dtype
+import numpy as np
+
+
 def add_datepart(df, fldname, drop=True, time=False):
     fld = df[fldname]
     fld_dtype = fld.dtype
@@ -17,6 +21,7 @@ def add_datepart(df, fldname, drop=True, time=False):
     df[targ_pre + 'Elapsed'] = fld.astype(np.int64) // 10 ** 9
     if drop:
         df.drop(fldname, axis=1, inplace=True)
+
 
 def preprocess(df):
     str_dtype, int_dtype, float_dtype = [], [], []
@@ -84,4 +89,18 @@ def preprocess(df):
 def reset_index(df):
     df.reset_index(inplace=True)
     df.drop('index', 1, inplace=True)
+    return df
+
+
+def get_elapsed(df, fld, pre):
+    day1 = np.timedelta64(1, 'D')
+    last_date = np.datetime64()
+    res = []
+
+    for v, d in zip(df[fld].values, df['date'].values):
+        if v != 0:
+            last_date = d
+        res.append(((d - last_date).astype('timedelta64[D]') / day1))
+
+    df[pre + '_' + fld] = res
     return df

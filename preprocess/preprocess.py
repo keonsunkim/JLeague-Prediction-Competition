@@ -75,7 +75,7 @@ os.chdir(path)
 # Below are General Functions that written in util.property
 # which will be continuosly called by other
 # functions In alphabetical order
-from util import *
+from utils import *
 
 
 """
@@ -128,7 +128,7 @@ def load_and_merge_original_data():
     # Change the name of the column "venue" to "stadium"
     # both in train and test set.
     for df in [train, test]:
-        df.rename(columns={'venue':'stadium'}, inplace=True)
+        df.rename(columns={'venue': 'stadium'}, inplace=True)
 
     # Concatonate train and test into combine
     combine = pd.concat([train, test], ignore_index=True)
@@ -152,6 +152,9 @@ def load_and_merge_original_data():
     # Merge the stadium data back in!
     combine = combine.merge(capacity, how='left', on='stadium')
 
+    # Change the type of the datatype of column name : 'match_date'
+    # from string type to datetime type
+    combine['match_date'] = pd.to_datetime(combine['match_date'])
     return combine
 
 #######################################################################
@@ -160,9 +163,9 @@ def load_and_merge_original_data():
 #######################################################################
 #######################################################################
 
+
 def set_extra_j1_j2_data(df):
     # must add extra data creating scripts
-
     """
     This function merges the crawled data of
     match data, and stadium capacities, etc into the main df.
@@ -294,11 +297,11 @@ def set_datetime(df):
 def get_stadium_area_geoinfo(df, gmaps):
     # Collect the name of the unique stadiums
     unique_stadium = combine['stadium'].dropna().unique()
-    
+
     # We're going to save the geo-info of the each stadium
-    # in this list by crwaling from google maps 
+    # in this list by crwaling from google maps
     stadium_area_dict = {}
-    
+
     for stadium in unique_stadium:
         geo_info = gmaps.geocode(address=stadium, language='jp')
         try:
@@ -306,13 +309,12 @@ def get_stadium_area_geoinfo(df, gmaps):
         except:
             pass
         stadium_area_dict[stadium] = stadium_area
-        
-    
-    pd.DataFrame( data    =  list( stadium_area_dict.items() ) , 
-                  columns =  ['stadium','geo_info'])
-    
+
+    pd.DataFrame(data=list(stadium_area_dict.items()),
+                 columns=['stadium', 'geo_info'])
+
     return stadium_area_df
-    
+
     ######----Done by this line------ ######
 
     def extract_area_name(row):
@@ -457,556 +459,6 @@ def get_area_info_of_team(df):
     )
 
     return df_done
-
-
-#######################################################################
-#######################################################################
-################## STEP 6 Create and Add Baseball Data ################
-#######################################################################
-#######################################################################
-
-def add_baseball_data(df, gmaps, crawling=False):
-        # The entire function which crawls data from the internet, then
-        # calls it to merge the data into our trainingset!
-
-    def baseball_extract(year):
-
-        year = str(year)
-        month = [str(x) for x in range(4, 12)]
-
-        # round, match date, home team, away team, venue, home team wins
-        # in the season before the game,home team loses in the season
-        # before the game, home team no decision before the game,
-        # attendance, post-season game dummy
-        round_b, date, home_team_b, away_team_b, venue_b, home_win, \
-            home_lose, home_nodcsn, attendance_b, tournament \
-            = [], [], [], [], [], [], [], [], [], []
-
-        for mon in month:
-
-            cal_url = 'http://npb.jp/bis/{}/calendar/index_{}.html'.format(
-                year, mon.zfill(2))
-            cal_r = requests.get(cal_url)
-            cal_r.encoding = 'utf-8'
-            cal_html = cal_r.text
-            cal_soup = BS(cal_html)
-
-            links = cal_soup.find_all('a')
-            game_links = []
-            for link in links:
-                page = link.get('href')
-                # html with length of 35 contains match data.
-                if len(page) == 35:
-                    game_links.append(page)
-
-            if len(game_links) == 0:
-                continue
-            else:
-                for game_link in game_links:
-                    game_url = 'http://npb.jp{}'.format(game_link)
-                    game_r = requests.get(game_url)
-                    game_r.encoding = 'uft-8'     # change the encoding format
-                    game_html = game_r.text
-                    game_soup = BS(game_html)
-
-                    try:
-                        game_breaker = game_soup.find(
-                            'td', {'align': "right", 'class': 'gmout'}).string
-                        continue
-                    except:
-                        if game_soup.find(
-                                'div', {'class': 'gmdivnumber'}) is None:
-                            continue   # To pass the day of no game
-                            # data, like the case of cancellation
-                            # due to heavy rain
-
-                        else:
-                            round_performance = game_soup.find(
-                                'div', {'class': 'gmdivnumber'}).string
-                            try:
-                                round_val = re.match(
-                                    '\d+回戦', round_performance).group()
-                            except:
-                                pass
-                            try:
-                                performance = re.search(
-                                    '(\d+)勝(\d+)敗(\d+)分',
-                                    round_performance).groups()
-
-                            except:
-                                continue
-                            win_val = int(performance[0])
-                            lose_val = int(performance[1])
-                            nodcsn_val = int(performance[2])
-
-                            # Code to calculate win, lose, and no
-                            # decision just before the game: to
-                            # prevent leakage problem
-
-                            score_finder = [x.string for x in game_soup.find_all(
-                                'td', {'align': 'center', 'class': 'gmscore'})]
-                            away_score = int(score_finder[1])
-                            home_score = int(score_finder[-3])
-                            if home_score > away_score:
-                                win_val = win_val - 1
-                            elif home_score < away_score:
-                                lose_val = lose_val - 1
-                            elif home_score == away_score:
-                                nodcsn_val = nodcsn_val - 1
-                            else:
-                                raise ValueError('{},{}'.format(h, a))
-
-                            # Attendance
-                            attend_raw = game_soup.find_all(
-                                'td', {'align': 'right'})[0].string
-                            attend_val = re.search(
-                                '(\d+),(\d+)', attend_raw).groups()
-                            attend_val = int(attend_val[0] + attend_val[1])
-
-                            # Venue
-                            venue_val = game_soup.find_all('td')[9].string
-                            venue_val
-
-                            # Match date / Home and away team
-                            date_teams_raw = game_soup.find('title').string
-                            date_raw = [x.zfill(2) for x in re.search(
-                                '(\d+)年(\d+)月(\d+)日', date_teams_raw).groups()]
-                            date_val = '-'.join(date_raw)
-
-                            teams_raw = re.search(
-                                '(\w+)vs(\w+)', date_teams_raw).groups()
-                            hometeam_val = teams_raw[0]
-                            awayteam_val = teams_raw[1]
-
-                            # Dummy variable to indicate whether it is
-                            # the post-season game
-                            if mon in ['10', '11'] and len(str(round_val)) == 1:
-                                tournament_val = 1
-                            else:
-                                tournament_val = 0
-
-                            round_b.append(round_val)
-                            date.append(date_val)
-                            home_team_b.append(hometeam_val)
-                            away_team_b.append(awayteam_val)
-                            venue_b.append(venue_val)
-                            home_win.append(win_val)
-                            home_lose.append(lose_val)
-                            home_nodcsn.append(nodcsn_val)
-                            attendance_b.append(attend_val)
-                            tournament.append(tournament_val)
-
-        baseball_data = pd.DataFrame(
-            data={
-                'round_b': round_b, 'date': date, 'home_team_b': home_team_b,
-                'away_team_b': away_team_b, 'venue_b': venue_b,
-                'home_win': home_win, 'home_lose': home_lose,
-                'home_nodcsn': home_nodcsn, 'attendance_b': attendance_b,
-                'tournament': tournament
-            }
-        )
-
-        baseball_data.to_csv('{}.csv'.format(year), index=False)
-        print('{} finished'.format(year))
-
-    if crawling == True:
-        try:
-            # To prevent server error, splited whole period to 2 blocks.
-            for x in range(2005, 2013):
-                baseball_extract(x)
-
-            for x in range(2013, 2019):
-                baseball_extract(x)
-
-            bb_list = glob('20*.csv')
-            for i, file in enumerate(bb_list):
-                if i == 0:
-                    merged_bb_data_1 = pd.read_csv(file)
-                else:
-                    bb_year = pd.read_csv(file)
-                    merged_bb_data_1 = pd.concat([merged_bb_data_1, bb_year])
-            case = 1
-        # When we crawl on NPB website, we found there were lot of
-        # server problems.
-        # SO in case the crawling failed, we attached pre-crawled
-        # dataset of baseball.
-        except:
-            bb_list = glob('pre_20*.csv')
-            print('baseball crawling erorr occured load pre-crawled dataset')
-            for i, file in enumerate(bb_list):
-                if i == 0:
-                    merged_bb_data_2 = pd.read_csv(file)
-                else:
-                    bb_year = pd.read_csv(file)
-                    merged_bb_data_2 = pd.concat([merged_bb_data_2, bb_year])
-            case = 2
-
-    else:
-        print('selected not to crawl baseball data')
-        print('load pre_crawled dataset')
-        bb_list = glob('pre_20*.csv')
-        for i, file in enumerate(bb_list):
-            if i == 0:
-                merged_bb_data_2 = pd.read_csv(file)
-            else:
-                bb_year = pd.read_csv(file)
-                merged_bb_data_2 = pd.concat([merged_bb_data_2, bb_year])
-        case = 2
-
-    if case == 1:
-        merged_bb_data = merged_bb_data_1.copy()
-    elif case == 2:
-        merged_bb_data = merged_bb_data_2.copy()
-
-    merged_bb_data['venue_b'] = merged_bb_data[
-        'venue_b'].apply(lambda x: ''.join(x.split('\u3000')))
-
-    # If the name of a venue is different by year, we unificated
-    # it for better prediction.
-    venue_name_changer = {'グッドウィル': '西武ドーム',
-                          'インボイス': '西武ドーム',
-                          'ＱＶＣマリン': 'マリン',
-                          '千葉マリン': 'マリン',
-                          'QVCマリン': 'マリン',
-                          'ZOZOマリン': 'マリン',
-                          'ヤフードーム': 'ヤフオクドーム',
-                          'スカイマーク': 'ほっと神戸',
-                          'フルスタ宮城': '宮城',
-                          'Ｋスタ宮城': '宮城',
-                          'Kスタ宮城': '宮城',
-                          'コボスタ宮城': '宮城',
-                          'Koboスタ宮城': '宮城',
-                          'Koboパーク宮城': '宮城',
-                          '楽天生命パーク': '宮城',
-                          'マツダ': '広島',
-                          '西武プリンス': '西武ドーム',
-                          'メットライフ': '西武ドーム',
-                          '京セラＤ大阪': '大阪ドーム',
-                          '京セラD大阪': '大阪ドーム'
-                          }
-
-    venue_to_change = venue_name_changer.keys()
-
-    merged_bb_data.loc[merged_bb_data['venue_b'].isin(venue_to_change), 'venue_b'] = merged_bb_data.loc[
-        merged_bb_data['venue_b'].isin(venue_to_change), 'venue_b'].apply(lambda x: venue_name_changer[x])
-
-    # In this procedure, we changed venue names to fit with the
-    # official name by NPB.
-    # Source: http://npb.jp/stadium/
-    venues = merged_bb_data.venue_b.unique().tolist()
-
-    official_venues = [
-        '西武ドーム', '千葉マリンスタジアム', 'ヤフオクドーム', '札幌ドーム', '大阪ドーム', '東京ドーム', 'ナゴヤドーム',
-        '楽天生命パーク宮城', 'ほっと神戸', '明治神宮野球場', '横浜スタジアム', '広島市民球場',
-        '福島県営あづま球場', 'いわきグリーンスタジアム', '阪神甲子園球場', '豊橋市民球場', '北九州市民球場',
-        '松山中央公園野球場', '長崎県営野球場', '山形県野球場', '佐賀県立森林公園野球場',
-        '西京極総合運動公園野球場', '福山市竹ヶ端運動公園野球場', '南長野運動公園野球場',
-        '岡山県倉敷スポーツ公園野球場', '札幌市円山球場', '広島県立びんご運動公園野球場',
-        '静岡県草薙総合運動場硬式野球場', '秋田県立野球場', '米子市民球場', '富山市民球場',
-        '鹿児島県立鴨池野球場', '岩手県営野球場', '福井県営球場', '岐阜県営長良川球場', '石川県立野球場',
-        '釧路市民球場', '帯広の森野球場', '浜松市営球場', 'ひたちなか市民球場', '平塚球場',
-        '花咲スポーツ公園硬式野球場', '群馬県立敷島公園野球場', '千代台公園野球場', '藤崎台県営野球場',
-        '下関球場', '小瀬スポーツ公園野球場', '山口市スポーツの森', '呉市二河野球場', '宇都宮清原球場',
-        '宮崎県総合運動公園硬式野球場', '大洲総合運動公園硬式野球場', '埼玉県営大宮公園野球場', '山形県野球場',
-        '相模原市立相模原球場', 'みよし運動公園野球場', '松本市野球場', '新潟県立鳥屋野潟公園野球場', '西京極総合運動公園野球場',
-        '郡山総合運動場開成山野球場', '埼玉県営大宮公園野球場', '那覇市営奥武山野球場', '宇部市野球場',
-        '皇子山総合運動公園野球場', '宮崎県総合運動公園硬式野球場', '弘前市運動公園野球場', '山形市営球場'
-    ]
-
-    venues_to_official = dict(zip(venues, official_venues))
-
-    merged_bb_data['venue_b'] = merged_bb_data[
-        'venue_b'].apply(lambda x: venues_to_official[x])
-
-    #  Adding dummy about all star game & post-season matches
-    merged_bb_data['round_b'] = merged_bb_data[
-        'round_b'].apply(lambda x: re.match('\d+', x)[0])
-
-    merged_bb_data['year'] = merged_bb_data[
-        'date'].apply(lambda x: x.split('-')[0])
-    merged_bb_data['month'] = merged_bb_data[
-        'date'].apply(lambda x: x.split('-')[1])
-    merged_bb_data['day'] = merged_bb_data[
-        'date'].apply(lambda x: x.split('-')[2])
-
-    merged_bb_data['month'] = merged_bb_data['month'].astype(int)
-    merged_bb_data['round_b'] = merged_bb_data['round_b'].astype(int)
-
-    july_round = [1, 2, 3]
-    aug_round = [2]
-    oct_nov_round = [1, 2, 3, 4, 5, 6, 7]
-    merged_bb_data['tournament'] = 0
-    merged_bb_data['allstar'] = 0
-
-    merged_bb_data.loc[(merged_bb_data.round_b.isin(july_round)) & (
-        merged_bb_data.month == 7), 'allstar'] = 1
-    merged_bb_data.loc[(merged_bb_data.round_b.isin(aug_round)) & (
-        merged_bb_data.month == 8), 'allstar'] = 1
-    merged_bb_data.loc[(merged_bb_data.round_b.isin(oct_nov_round)) & (
-        merged_bb_data.month.isin([10, 11])), 'tournament'] = 1
-
-    merged_bb_data.loc[merged_bb_data['home_team_b']
-                       == 'セ', 'home_team_b'] = 'セントラル'
-    merged_bb_data.loc[merged_bb_data['away_team_b']
-                       == 'セ', 'away_team_b'] = 'セントラル'
-    merged_bb_data.loc[merged_bb_data['home_team_b']
-                       == 'パ', 'home_team_b'] = 'パシフィック'
-    merged_bb_data.loc[merged_bb_data['away_team_b']
-                       == 'パ', 'away_team_b'] = 'パシフィック'
-
-    merged_bb_data.loc[(merged_bb_data['away_team_b'] == 'パシフィック') & (
-        merged_bb_data['home_team_b'] == 'リーグ'), 'home_team_b'] = 'セントラル'
-    merged_bb_data.loc[(merged_bb_data['away_team_b'] == 'セントラル') & (
-        merged_bb_data['home_team_b'] == 'リーグ'), 'home_team_b'] = 'パシフィック'
-
-    # Adding information about team's hometown
-    teams_b = {'セ', '東京ヤクルト', '横浜', 'パ', 'ヤクルト', '埼玉西武', 'パシフィック', '広島東洋',
-               'セントラル', '読売', '福岡ソフトバンク', 'ＳＫ', 'オリックス', '西武', '中日', 'ＫＩＡ',
-               '千葉ロッテ', '阪神', '北海道日本ハム', '東北楽天', 'リーグ', '横浜DeNA'}
-
-    team_area = [None, 13000, 14000, None, 13000, 11000, 50000, 34000, 51000, 13000,
-                 40000, 52000, 27000, 11000, 23000, 52000, 12000, 28000, 1000,
-                 4000, None, 14000]
-
-    # パシフィック: 50000, セントラル: 51000, SK&KIA(Korean teams): 52000
-    #   -> Attached by ourself.
-    team_area_b = pd.DataFrame(data={'team_b': teams_b, 'area_b': team_area})
-
-    team_area_dict = dict(zip(teams_b, team_area))
-
-    merged_bb_data['home_area_b'] = merged_bb_data[
-        'home_team_b'].apply(lambda x: team_area_dict[x])
-    merged_bb_data['away_area_b'] = merged_bb_data[
-        'away_team_b'].apply(lambda x: team_area_dict[x])
-
-    # Adding derby match dummy
-    kansai_derby = [27000, 28000]
-
-    merged_bb_data['derby_b'] = 0
-    merged_bb_data.loc[(merged_bb_data['home_area_b'] ==
-                        merged_bb_data['away_area_b']), 'derby_b'] = 1
-    merged_bb_data.loc[(merged_bb_data['home_area_b'].isin(kansai_derby)) & (
-        merged_bb_data['away_area_b'].isin(kansai_derby)), 'derby_b'] = 1
-
-    # Unificating team name for better prediction
-    merged_bb_data.loc[merged_bb_data['home_team_b']
-                       == '埼玉西武', 'home_team_b'] = '西武'
-    merged_bb_data.loc[merged_bb_data['away_team_b']
-                       == '埼玉西武', 'away_team_b'] = '西武'
-
-    bb = merged_bb_data.copy()
-    del bb['year'], bb['month'], bb['day']
-
-    # Adding area & area code information to each baseball stadium
-    # found by myself
-    venue_b = [
-        '西武ドーム', '千葉マリンスタジアム', 'ヤフオクドーム', '札幌ドーム', '大阪ドーム', '東京ドーム', 'ナゴヤドーム',
-        '楽天生命パーク宮城', 'ほっと神戸', '明治神宮野球場', '横浜スタジアム', '広島市民球場', '福島県営あづま球場',
-        'いわきグリーンスタジアム', '阪神甲子園球場', '豊橋市民球場', '北九州市民球場', '松山中央公園野球場',
-        '長崎県営野球場', '山形県野球場', '佐賀県立森林公園野球場', '西京極総合運動公園野球場',
-        '福山市竹ヶ端運動公園野球場', '南長野運動公園野球場', '岡山県倉敷スポーツ公園野球場', '札幌市円山球場',
-        '広島県立びんご運動公園野球場', '静岡県草薙総合運動場硬式野球場', '秋田県立野球場', '米子市民球場',
-        '富山市民球場', '鹿児島県立鴨池野球場', '岩手県営野球場', '福井県営球場', '岐阜県営長良川球場', '石川県立野球場',
-        '釧路市民球場', '帯広の森野球場', '浜松市営球場', 'ひたちなか市民球場', '平塚球場', '花咲スポーツ公園硬式野球場',
-        '群馬県立敷島公園野球場', '千代台公園野球場', '藤崎台県営野球場', '下関球場', '小瀬スポーツ公園野球場',
-        '山口市スポーツの森', '呉市二河野球場', '宇都宮清原球場', '宮崎県総合運動公園硬式野球場', '大洲総合運動公園硬式野球場',
-        '埼玉県営大宮公園野球場', '相模原市立相模原球場', 'みよし運動公園野球場', '松本市野球場', '新潟県立鳥屋野潟公園野球場',
-        '郡山総合運動場開成山野球場'
-    ]
-
-    venue_area_code_b = [
-        11000, 12000, 40000, 1000, 27000, 13000, 23000, 45000, 28000, 13000,
-        14000, 34000, 7000, 7000, 28000, 23000, 40000, 40000, 42000, 6000,
-        41000, 26000, 34000, 20000, 33000, 1000, 34000, 22000, 5000, 31000,
-        16000, 46000, 3000, 18000, 21000, 17000, 1000, 1000, 22000, 8000,
-        14000, 1000, 10000, 1000, 43000, 35000, 19000, 35000, 44000, 34000,
-        9000, 45000, 11000, 14000, 34000, 11000, 15000, 7000
-    ]
-
-    pref_code = pd.read_csv('prefecture_code.csv')
-    pref_code = pref_code[['AREA', 'AREA Code']].drop_duplicates()
-    pref_code.columns = ['area', 'area_code']
-
-    bb_venue_area_code = pd.DataFrame(
-        data={'venue_b': venue_b, 'venue_area_code_b': venue_area_code_b}
-    )
-
-    bb_area_code_done = bb.merge(
-        right=bb_venue_area_code, how='left', on='venue_b'
-    )
-
-    bb_area_done = bb_area_code_done.merge(
-        right=pref_code, how='left',
-        left_on='venue_area_code_b', right_on='area_code'
-    )
-
-    del bb_area_done['area_code']
-    bb_area_done.rename(columns={'area': 'venue_area_b'}, inplace=True)
-
-    # Merging to main dataset
-    d6_2 = bb_area_done.copy()
-#     d6_2['date'] = pd.to_datetime(d6_2['date'])
-    df_b = df.merge(
-        right=d6_2, how='left', left_on=['match_date', 'venue_area'],
-        right_on=['date', 'venue_area_b']
-    )
-
-    df_b['home_area_b'] = df_b['home_area_b'].astype(str)
-
-    # For the case that two games are held same time at one region,
-    # We created one more set of columns for baseball features to
-    # include data about second game.
-
-    two_finder = df_b.id.value_counts()
-
-    two_index = two_finder[two_finder == 2].index
-
-    df_two = df_b.loc[df_b.id.isin(two_index)]
-    df_two.reset_index(inplace=True)
-    del df_two['index']
-
-    two_even = df_two.loc[df_two.index % 2 == 0]
-    two_even.reset_index(inplace=True)
-    del two_even['index']
-    two_odd = df_two.loc[df_two.index % 2 == 1]
-    two_odd.reset_index(inplace=True)
-    del two_odd['index']
-
-    two_add = two_even.merge(
-        right=two_odd, how='left',
-        on=[
-            'attendance', 'away_team', 'broadcasters', 'capacity', 'division',
-            'home_team', 'humidity', 'id', 'kick_off_time', 'match_date',
-            'round', 'section', 'temperature', 'venue', 'weather',
-            'venue_area_code', 'venue_area', 'home_team_area_code',
-            'home_team_area', 'away_team_area_code', 'away_team_area'
-        ]
-    )
-
-    col_x = [x for x in list(two_add) if '_x' in x]
-    col_y = [y for y in list(two_add) if '_y' in y]
-    col_fix1 = [x[:-2] + '_1' for x in col_x]
-    col_fix2 = [x[:-2] + '_2' for x in col_y]
-
-    col_fix = col_fix1 + col_fix2
-
-    col_changer = dict(zip(col_x + col_y, col_fix))
-
-    two_add.rename(columns=col_changer, inplace=True)
-
-    df_col_to_change = [
-        'round_b', 'home_team_b', 'away_team_b', 'venue_b', 'home_win',
-        'home_lose', 'home_nodcsn', 'attendance_b', 'tournament', 'lat_b',
-        'lon_b', 'allstar', 'derby_b', 'home_area_b', 'away_area_b'
-    ]
-
-    df_col_changed = [x + '_1' for x in df_col_to_change]
-
-    df_col_changer = dict(zip(df_col_to_change, df_col_changed))
-
-    df_b.rename(columns=df_col_changer, inplace=True)
-
-    df_to_drop = df_b.loc[df_b.id.isin(two_add.id.values.tolist())].index
-
-    df_b.drop(index=df_to_drop, inplace=True)
-
-    df_two = pd.concat([df_b, two_add])
-
-    drop_cols2 = [x for x in list(df_two) if x.startswith(
-        'match') and (x.endswith('_1') or x.endswith('_2'))]
-
-    for col in drop_cols2:
-        del df_two[col]
-
-    df_two.sort_values(by=['id'], inplace=True)
-
-    d6_3 = df_two.copy()
-
-    # Adding distance between soccer & baseball venue,
-    # if both games are at same prefecture at same day.
-
-    obj = d6_3[['id', 'venue', 'venue_b_1', 'venue_b_2']]
-
-    # When two baseball games are held in same region at same day, we
-    # put features of second game(chosen randomly) to '~~b_2_' columns
-    # combination of stadiums 'venue  - venue_b_2 ' are all included in
-    # 'venue - venue_b_1' cases.
-    # SO just need to calculate distance & combination of
-    # 'venue - venue_b_1' cases and apply it to  'venue  - venue_b_2 '.
-
-    stadiums = obj[['venue', 'venue_b_1']].dropna().drop_duplicates()
-
-    soccer_venue = stadiums.venue.tolist()
-    baseball_venue = stadiums.venue_b_1.tolist()
-
-    durations = []
-    distances = []
-
-    for dep, arr in zip(soccer_venue, baseball_venue):
-
-        raw_data = gmaps.distance_matrix(dep, arr, language='jp')
-
-        dist = raw_data['rows'][0]['elements'][0]['distance']['value'] / 1000
-        distances.append(dist)
-
-        duration = float(raw_data['rows'][0]['elements'][
-                         0]['duration']['value']) / 60
-        if type(duration) == float:
-            durations.append(duration)
-        else:
-            print(dep, arr)
-            durations.append(NaN)
-
-    bf_dist = pd.DataFrame(
-        data={'venue': soccer_venue, 'venue_b': baseball_venue,
-              'duration': durations, 'distance': distances
-              }
-    )
-
-    intersport = obj.merge(right=bf_dist, how='left',
-                           left_on=['venue', 'venue_b_1'],
-                           right_on=['venue', 'venue_b']
-                           )
-
-    del intersport['venue_b']
-
-    intersport.rename(
-        columns={'duration': 'duration_1', 'distance': 'distance_1'},
-        inplace=True
-    )
-
-    intersport = intersport.merge(
-        right=bf_dist, how='left', left_on=['venue', 'venue_b_2'],
-        right_on=['venue', 'venue_b']
-    )
-
-    del intersport['venue_b']
-
-    intersport.rename(
-        columns={'duration': 'duration_2', 'distance': 'distance_2'},
-        inplace=True
-    )
-
-    bb_merged_data = d6_3.merge(right=intersport, how='left', on=[
-                                'id', 'venue', 'venue_b_1', 'venue_b_2']
-                                )
-
-    bb_merged_data.rename(
-        columns={
-            'duration_1': 'duration_bet_sports_1',
-            'distance_1': 'dist_bet_sports_1',
-            'duration_2': 'duration_bet_sports_2',
-            'distance_2': 'dist_bet_sports_2'
-        }, inplace=True
-    )
-
-    bb_merged_data = bb_merged_data.drop_duplicates()
-    del bb_merged_data['date']
-
-    df_done = bb_merged_data.copy()
-
-    return df_done
-
 
 #######################################################################
 #######################################################################
@@ -1160,66 +612,58 @@ def get_location_distance_duration(df, google_map_key):
 #######################################################################
 #######################################################################
 
-def add_holiday_data(df):
+# Load holiday dataset
+# Data source:
+# http://zangyoukeisan.cocolog-nifty.com/blog/2011/09/
+# post-b23f.html
+holiday = pd.read_excel('holiday_extra.xls', sheet_name='振替休日あり')
 
-    # data source:
-    # http://zangyoukeisan.cocolog-nifty.com/blog/2011/09/
-    # post-b23f.html
-    holiday = pd.read_excel('holiday_extra.xls', sheet_name='振替休日あり')
+
+def add_holiday_feauture(df):
+    # Preprcoess the holiday dataset
     holiday = holiday[['年月日', '祝日名']]
     holiday.columns = ['holiday_date', 'description']
     holiday = holiday[holiday['holiday_date'] > '1992-12-21']
 
+    # Make a dataframe date_df which
+    # records whether the day is weekend or not ,
+    # holiday or not from 1992-12-21 to 2018-12-31
     date_df = pd.date_range(start='1992-12-21', end='2018-12-31', freq='D')
     date_df = pd.DataFrame(date_df, columns=['date'])
 
-    date_df['wod'] = date_df['date'].dt.weekday
-    date_df['is_weekend'] = (date_df['wod'] >= 5).astype(np.int8)
+    date_df['DayOfWeek'] = date_df['date'].dt.weekday
+    date_df['is_Weekend'] = (date_df['DayOfWeek'] >= 5).astype(np.int8)
 
     date_df = date_df.merge(holiday, left_on='date',
                             right_on='holiday_date', how='left')
     date_df.drop('holiday_date', 1, inplace=True)
 
     date_df['is_holiday'] = date_df['description'].notnull().astype(np.int8)
-    date_df['is_dayoff'] = date_df['is_weekend'] + date_df['is_holiday']
+    date_df['is_dayoff'] = date_df['is_Weekend'] + date_df['is_holiday']
 
-    def get_elapsed(fld, pre):
-        day1 = np.timedelta64(1, 'D')
-        last_date = np.datetime64()
-        res = []
-
-        for v, d in zip(date_df[fld].values, date_df['date'].values):
-
-            if v != 0:
-                last_date = d
-
-            res.append(((d - last_date).astype('timedelta64[D]') / day1))
-        date_df[pre + '_' + fld] = res
-
+    # Use get_elapsed function from util.py
+    # and calculate how many days left before next day off and
+    # how many days passed from the last day off
     fld = 'is_dayoff'
-
     get_elapsed(fld, 'After')
-
     date_df = date_df.sort_values('date', ascending=False)
     get_elapsed(fld, 'Before')
 
+    # Calculate how many days left before next holiday and
+    # how many days passed from the last holiday
     date_df = date_df.sort_values('date')
 
     fld = 'is_holiday'
-
     get_elapsed(fld, 'After')
-
     date_df = date_df.sort_values('date', ascending=False)
     get_elapsed(fld, 'Before')
 
     date_df = date_df.sort_values('date')
 
-    df['match_date'] = pd.to_datetime(df['match_date'])
+    df = df.merge(date_df, left_on='match_date', right_on='date', how='left')
+    df = preprocess(df)
 
-    d8 = df.merge(date_df, left_on='match_date', right_on='date', how='left')
-    df_done = preprocess(d8)
-
-    return df_done
+    return df
 
 #######################################################################
 #######################################################################
