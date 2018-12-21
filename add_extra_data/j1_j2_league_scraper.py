@@ -199,7 +199,7 @@ if __name__ == '__main__':
     extra_data1 = pd.DataFrame(
         columns=[
             'attendance', 'division', 'section', 'round', 'home_team',
-            'away_team', 'stadium', 'score', 'broadcasters', 'match_id'])
+            'away_team', 'broadcasters', 'match_id'])
 
     s = requests.Session()
     s.headers.update({
@@ -215,9 +215,11 @@ if __name__ == '__main__':
         for year in range(time_frame[0], time_frame[1]):
             print(year)
             random_waiter(20, 50)
-            extra_data1 = pd.concat([extra_data1,
-                                     scrape_jleague_match_data1(s, year, opt)
-                                     ])
+            extra_data1 = pd.concat([
+                extra_data1,
+                scrape_jleague_match_data1(s, year, opt),
+
+            ])
 
     extra_data1.to_csv('extra_data1')
 
