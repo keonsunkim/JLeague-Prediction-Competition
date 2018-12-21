@@ -17,8 +17,6 @@ now.
 mybest to format the code to conform to PEP8, but it is still a
 nightmare.
 """
-
-
 #######################################################################
 ###########STEP 0 Imports and Introducing Global Functions#############
 #######################################################################
@@ -48,11 +46,8 @@ from bs4 import BeautifulSoup as BS
 import pandas as pd
 import numpy as np
 from pandas.api.types import is_numeric_dtype, is_string_dtype
-from numpy import NaN
 # Numpy and Pandas
 
-from IPython.display import display
-# For Display
 
 from meteocalc import Temp, dew_point, heat_index
 # 3rd Party Packages for Processing and Analysis
@@ -77,109 +72,10 @@ os.chdir(path)
 ############# STEP 0 General Functions and Variables ##################
 #######################################################################
 #######################################################################
-# Below are General Functions which will be continuosly called by other
+# Below are General Functions that written in util.property
+# which will be continuosly called by other
 # functions In alphabetical order
-
-
-def add_datepart(df, fldname, drop=True, time=False):
-    fld = df[fldname]
-    fld_dtype = fld.dtype
-    if isinstance(fld_dtype, pd.core.dtypes.dtypes.DatetimeTZDtype):
-        fld_dtype = np.datetime64
-
-    if not np.issubdtype(fld_dtype, np.datetime64):
-        df[fldname] = fld = pd.to_datetime(fld, infer_datetime_format=True)
-    targ_pre = re.sub('[Dd]ate$', '', fldname)
-    attr = ['Year', 'Month', 'Week', 'Day', 'Dayofweek', 'Dayofyear',
-            'Is_month_end', 'Is_month_start', 'Is_quarter_end',
-            'Is_quarter_start']
-    if time:
-        attr = attr + ['Hour']
-    for n in attr:
-        df[targ_pre + n] = getattr(fld.dt, n.lower())
-    df[targ_pre + 'Elapsed'] = fld.astype(np.int64) // 10 ** 9
-    if drop:
-        df.drop(fldname, axis=1, inplace=True)
-
-
-def display_all(df):
-    with pd.option_context("display.max_rows", 1000):
-        with pd.option_context("display.max_columns", 1000):
-            display(df)
-
-
-def evalerror(preds, dtrain):
-    labels = dtrain.get_label()
-    return 'rmse_', rmse(labels, preds), False
-
-
-def preprocess(df):
-    str_dtype, int_dtype, float_dtype = [], [], []
-
-    for col in df.columns:
-        if is_string_dtype(df[col]):
-            str_dtype.append(col)
-        elif is_numeric_dtype(df[col]):
-            if str(df[col].dtypes)[:3] == 'int':
-                int_dtype.append(col)
-            else:
-                float_dtype.append(col)
-
-    for col in int_dtype:
-        for num in [8, 16, 32, 64]:
-            if np.mean(
-                    df[col] == df[col].astype('int' + str(num))) == 1:
-                df[col] = df[col].astype('int' + str(num))
-                break
-
-    for col in float_dtype:
-        for num in [16, 32, 64]:
-            if np.mean(df[col] == df[col].astype('float' + str(num))
-                       ) == 1:
-                if np.mean(df[col] == df[col].astype('int' + str(num))
-                           ) == 1:
-                    df[col] = df[col].astype('int' + str(num))
-                else:
-                    df[col] = df[col].astype('float' + str(num))
-                break
-
-    return df
-
-
-def preprocess(df):
-    str_dtype, int_dtype, float_dtype = [], [], []
-
-    for col in df.columns:
-        if is_string_dtype(df[col]):
-            str_dtype.append(col)
-        elif is_numeric_dtype(df[col]):
-            if str(df[col].dtypes)[:3] == 'int':
-                int_dtype.append(col)
-            else:
-                float_dtype.append(col)
-
-    for col in int_dtype:
-        for num in [8, 16, 32, 64]:
-            if np.mean(df[col] == df[col].astype('int' + str(num))) == 1:
-                df[col] = df[col].astype('int' + str(num))
-                break
-
-    for col in float_dtype:
-        for num in [16, 32, 64]:
-            if np.mean(df[col] == df[col].astype('float' + str(num))) == 1:
-                if np.mean(df[col] == df[col].astype('int' + str(num))) == 1:
-                    df[col] = df[col].astype('int' + str(num))
-                else:
-                    df[col] = df[col].astype('float' + str(num))
-                break
-
-    return df
-
-
-def reset_index(df):
-    df.reset_index(inplace=True)
-    df.drop('index', 1, inplace=True)
-    return df
+from util import *
 
 
 """
@@ -190,22 +86,20 @@ Stadiums, and Teams
 # Function to unificate venue name and team name for better prediction.
 
 
-def tidying_venue_name(df):
+def process_stadium_names(df):
+    """
+
+    """
+    df['stadium'] = df['stadium'].replace(to_replace=same_stadium_dict)
 
 
-    df['venue'] = df['venue'].replace(to_replace=same_stadium_dict)
-
-
-def tidying_team_name(df):
+def process_team_names(df):
     # A football team may have the multiple names due to historical
     # reasons and due to denotation reasons. The Japanese 'G' and
     # the English 'G' are the same G for humans but not for the
     # computer.
     # Teams like Ｖ川崎 = Kawasaky Verdy, 東京Ｖ = Tokyo Verdy are the same
     # team just has different names in a different point of time in history.
-
-
-
     df['home_team'] = df['home_team'].replace(to_replace=same_team_dict)
     df['away_team'] = df['away_team'].replace(to_replace=same_team_dict)
 
@@ -214,51 +108,50 @@ def tidying_team_name(df):
 # is not 'venue', which is designated in  tidying_venue_name(df)
 # function, we created dictionary to convert venues' name.
 
-
+# STEP 0
 
 #######################################################################
 #######################################################################
 ######## STEP 1 Loading Datasets Given By Competition Host ############
 #######################################################################
 #######################################################################
+train = pd.read_csv('../original_data/train.csv')
+test = pd.read_csv('../original_data/test.csv')
+capacity = pd.read_csv('stadium_capacity_mapping.csv')
+
+same_stadium_dict = np.load('dictionary_folder/same_stadium_dict.npy').item()
+same_team_dict = np.load('dictionary_folder/same_team_dict.npy').item()
+
 
 def load_and_merge_initial_data():
-    train = pd.read_csv('train.csv')
-    test = pd.read_csv('test.csv')
-    # Load the train, test csv file
 
-    merged = pd.concat([train, test], ignore_index=True)
-    merged = merged[[
+    # Change the name of the column "venue" to "stadium"
+    # both in train and test set.
+    for df in [train, test]:
+        df.rename(columns={'venue':'stadium'}, inplace=True)
+
+    combine = pd.concat([train, test], ignore_index=True)
+
+    # Change the order of the columns
+    combine = combine[[
         'id', 'attendance', 'away_team', 'broadcasters', 'home_team',
         'humidity', 'kick_off_time', 'match_date', 'round', 'section',
-        'temperature', 'venue', 'weather'
+        'temperature', 'stadium', 'weather'
     ]]
-    # limit the columns
 
-    tidying_venue_name(merged)
-    tidying_team_name(merged)
-    # Set the team and stadium names straight.
+    # Set the team and stadium names straight
+    # on two datasets(combine, capacity)
+    process_stadium_names(combine)
+    process_team_names(combine)
+    process_stadium_names(capacity)
 
-    cap = pd.read_csv('stadium_capacity_mapping.csv')
-    cap.rename(columns={'stadium': 'venue'}, inplace=True)
-    tidying_venue_name(cap)
+    # Drop all duplicates in capacity
+    capacity.drop_duplicates(inplace=True)
 
-    cap_dupl_check = cap.venue.value_counts()
-    # check how many duplicate stadium data are there
-    more_than_two = cap_dupl_check[cap_dupl_check >= 2].index
-
-    # There are no cases in which attendances change
-    # when stadium names are changed.
-
-    cap[cap.venue.isin(more_than_two)]
-    cap = cap.drop_duplicates()
-    # Drop all duplicates
-
-    df = merged.merge(right=cap, how='left', on='venue')
     # merge the stadium data back in!
+    combine = combine.merge(capacity, how='left', on='stadium')
 
-    return df
-
+    return combine
 
 #######################################################################
 #######################################################################
@@ -266,8 +159,9 @@ def load_and_merge_initial_data():
 #######################################################################
 #######################################################################
 
-
 def set_extra_j1_j2_data(df):
+    # must add extra data creating scripts
+
     """
     This function merges the crawled data of
     match data, and stadium capacities, etc into the main df.
