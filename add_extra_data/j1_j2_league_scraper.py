@@ -49,8 +49,10 @@ def process_table_for_jleague_data1(soup):
                    for opt in column_and_table_order]
         data.append(td_list)
 
-    table_pd = pd.DataFrame(columns=[opt[0]
-                                     for opt in column_and_table_order], data=data)
+    table_pd = pd.DataFrame(
+        columns=[opt[0] for opt in column_and_table_order],
+        data=data,
+    )
 
     # add year and date, turn it into pd datetime object!
     table_pd['match_date'] = pd.to_datetime(
@@ -134,7 +136,8 @@ def scrape_jleague_match_data1(session, year, division):
     )
     # now create a dataframe to gather and process data!
 
-    processed_table = process_table_for_jleague(soup_contain_result_table)
+    processed_table = process_table_for_jleague_data1(
+        soup_contain_result_table)
 
     return processed_table
 
@@ -207,8 +210,10 @@ if __name__ == '__main__':
     )
 
     for opt in (1, 2):
+        print(opt)
         time_frame = scrape_options.pop(opt)
         for year in range(time_frame[0], time_frame[1]):
+            print(year)
             random_waiter(20, 50)
             extra_data1 = pd.concat([extra_data1,
                                      scrape_jleague_match_data1(s, year, opt)
@@ -216,19 +221,20 @@ if __name__ == '__main__':
 
     extra_data1.to_csv('extra_data1')
 
-    extra_data2s = pd.DataFrame(
-        columns=[
-            'match_id', 'home_team_player_1', 'home_team_player_2',
-            'home_team_player_3', 'home_team_player_4', 'home_team_player_5',
-            'home_team_player_6', 'home_team_player_7', 'home_team_player_8',
-            'home_team_player_9', 'home_team_player_10', 'home_team_player_11',
-            'away_team_player_1', 'away_team_player_2',  'away_team_player_3',
-            'away_team_player_4', 'away_team_player_5', 'away_team_player_6',
-            'away_team_player_7', 'away_team_player_8', 'away_team_player_9',
-            'away_team_player_10', 'away_team_player_11', 'stadium_name',
-            'weather', 'temperature', 'humidity'
-        ]
-    )
+    # extra_data2 = pd.DataFrame(
+    #     columns=[
+    #         'match_id', 'home_team_player_1', 'home_team_player_2',
+    #         'home_team_player_3', 'home_team_player_4', 'home_team_player_5',
+    #         'home_team_player_6', 'home_team_player_7', 'home_team_player_8',
+    #         'home_team_player_9', 'home_team_player_10', 'home_team_player_11',
+    #         'away_team_player_1', 'away_team_player_2',  'away_team_player_3',
+    #         'away_team_player_4', 'away_team_player_5', 'away_team_player_6',
+    #         'away_team_player_7', 'away_team_player_8', 'away_team_player_9',
+    #         'away_team_player_10', 'away_team_player_11', 'stadium_name',
+    #         'weather', 'temperature', 'humidity'
+    #     ]
+    # )
 
-    for match_id in list(extra_data1['match_id']):
-        extra_data2 = scrape_jleague_match_data2(s, match_id)
+    # data_list_for_extra_list = list()
+    # for match_id in list(extra_data1['match_id']):
+    # data_list_for_extra_list.append(scrape_jleague_match_data2(s, match_id)
