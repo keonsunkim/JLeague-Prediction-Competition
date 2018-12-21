@@ -2,6 +2,7 @@
 Utility functions for our scraper
 """
 import time
+import re
 from random import randrange
 
 import requests
@@ -9,16 +10,18 @@ from bs4 import BeautifulSoup
 
 
 def random_waiter(min, max):
-    """
-    waits within a random min, max second (parameters are miliseconds)
+    """ Waits within a certain period of time
+    Random between min and max (parameters are miliseconds)
     """
     time.sleep(randrange(min, max) * 0.1)
 
 
+def clean_string(string):
+    return re.sub('(\s+)', ' ', string.strip())
+
+
 def connection_checker(response):
-    """
-    checks if the requests recieved a success http status code
-    """
+    """Checks whether the requests recieved a success status code"""
     success_http_status_code = (200, 201, 202)
 
     if response.status_code not in success_http_status_code:
@@ -28,8 +31,8 @@ def connection_checker(response):
 
 
 def check_and_find_html_elements(html, *args, **kwargs):
-    """
-    there can be cases which the html response may give out
+    """Raise Error if unable to find html elements
+    There can be cases which the html response may give out
     200 status code, but lacks the information we aim to scrape.
 
     ex) "https://data.j-league.or.jp/SFMS01/search?
@@ -38,8 +41,6 @@ def check_and_find_html_elements(html, *args, **kwargs):
     In the case above, the get method parameter did not comply
     properly to the website's get url logic. Thus recieved a
     webpage with no search results.
-
-    We intend to catch problems like this.
     """
     nested = kwargs.pop('nested', False)
 
