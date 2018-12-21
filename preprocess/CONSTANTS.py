@@ -25,3 +25,24 @@ Before_is_dayoff   : How many days left before the next dayoff
 After_is_holiday   : How many days past from the last holiday
 Before_is_holiday  : How many days left before the next hoilday 
 '''
+
+MATCH_REPORTS_COLUMNS = [
+    'id', 'home_team_player11', 'home_team_player10', 'home_team_player9',
+    'home_team_player8', 'home_team_player7', 'home_team_player6',
+    'home_team_player5', 'home_team_player4', 'home_team_player3',
+    'home_team_player2', 'home_team_player1', 'home_team_score',
+    'away_team_score', 'away_team_player1', 'away_team_player2',
+    'away_team_player3', 'away_team_player4', 'away_team_player5',
+    'away_team_player6', 'away_team_player7', 'away_team_player8',
+    'away_team_player9', 'away_team_player10', 'away_team_player11',
+]
+
+MATCH_REPORTS_COLUMNS = [
+    'attendance', 'away_team', 'broadcasters', 'division',
+    'home_team', 'id', 'kick_off_time', 'match_date', 'round',
+    'section', 'humidity', 'temperature', 'venue', 'weather'
+]
+
+same_team_dict = {}
+
+CONSTANTS.same_team_dict

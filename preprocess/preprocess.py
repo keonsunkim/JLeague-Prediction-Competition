@@ -75,7 +75,7 @@ os.chdir(path)
 # Below are General Functions that written in util.property
 # which will be continuosly called by other
 # functions In alphabetical order
-from util import *
+from utils import *
 
 
 """
@@ -128,7 +128,7 @@ def load_and_merge_original_data():
     # Change the name of the column "venue" to "stadium"
     # both in train and test set.
     for df in [train, test]:
-        df.rename(columns={'venue':'stadium'}, inplace=True)
+        df.rename(columns={'venue': 'stadium'}, inplace=True)
 
     # Concatonate train and test into combine
     combine = pd.concat([train, test], ignore_index=True)
@@ -151,10 +151,10 @@ def load_and_merge_original_data():
 
     # Merge the stadium data back in!
     combine = combine.merge(capacity, how='left', on='stadium')
-    
+
     # Change the type of the datatype of column name : 'match_date'
     # from string type to datetime type
-    combine['match_date'] = pd.to_datetime( combine['match_date'] )
+    combine['match_date'] = pd.to_datetime(combine['match_date'])
     return combine
 
 combine  = load_and_merge_initial_data()
@@ -164,9 +164,9 @@ combine  = load_and_merge_initial_data()
 #######################################################################
 #######################################################################
 
+
 def set_extra_j1_j2_data(df):
     # must add extra data creating scripts
-
     """
     This function merges the crawled data of
     match data, and stadium capacities, etc into the main df.
@@ -298,11 +298,11 @@ def set_datetime(df):
 def get_stadium_area_geoinfo(df, gmaps):
     # Collect the name of the unique stadiums
     unique_stadium = combine['stadium'].dropna().unique()
-    
+
     # We're going to save the geo-info of the each stadium
-    # in this list by crwaling from google maps 
+    # in this list by crwaling from google maps
     stadium_area_dict = {}
-    
+
     for stadium in unique_stadium:
         geo_info = gmaps.geocode(address=stadium, language='jp')
         try:
@@ -310,13 +310,12 @@ def get_stadium_area_geoinfo(df, gmaps):
         except:
             pass
         stadium_area_dict[stadium] = stadium_area
-        
-    
-    pd.DataFrame( data    =  list( stadium_area_dict.items() ) , 
-                  columns =  ['stadium','geo_info'])
-    
+
+    pd.DataFrame(data=list(stadium_area_dict.items()),
+                 columns=['stadium', 'geo_info'])
+
     return stadium_area_df
-    
+
     ######----Done by this line------ ######
 
     def extract_area_name(row):
@@ -620,6 +619,7 @@ def get_location_distance_duration(df, google_map_key):
 # post-b23f.html
 holiday = pd.read_excel('holiday_extra.xls', sheet_name='振替休日あり')
 
+
 def add_holiday_feauture(df):
     # Preprcoess the holiday dataset
     holiday = holiday[['年月日', '祝日名']]
@@ -627,7 +627,7 @@ def add_holiday_feauture(df):
     holiday = holiday[holiday['holiday_date'] > '1992-12-21']
 
     # Make a dataframe date_df which
-    # records whether the day is weekend or not , 
+    # records whether the day is weekend or not ,
     # holiday or not from 1992-12-21 to 2018-12-31
     date_df = pd.date_range(start='1992-12-21', end='2018-12-31', freq='D')
     date_df = pd.DataFrame(date_df, columns=['date'])
@@ -642,7 +642,11 @@ def add_holiday_feauture(df):
     date_df['is_holiday'] = date_df['description'].notnull().astype(np.int8)
     date_df['is_dayoff'] = date_df['is_Weekend'] + date_df['is_holiday']
 
+<<<<<<< HEAD
     # Use get_elapsed function from util.py 
+=======
+    # Use get_elapsed function from util.py
+>>>>>>> 03c9dbdd547b66098ac87c9ef8283fe32fc6fe2e
     # and calculate how many days left before next day off and
     # how many days passed from the last day off
     fld = 'is_dayoff'
@@ -660,7 +664,6 @@ def add_holiday_feauture(df):
     get_elapsed(fld, 'Before')
 
     date_df = date_df.sort_values('date')
-
 
     df = df.merge(date_df, left_on='match_date', right_on='date', how='left')
     df = preprocess(df)
