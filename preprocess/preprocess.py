@@ -123,13 +123,14 @@ same_stadium_dict = np.load('dictionary_folder/same_stadium_dict.npy').item()
 same_team_dict = np.load('dictionary_folder/same_team_dict.npy').item()
 
 
-def load_and_merge_initial_data():
+def load_and_merge_original_data():
 
     # Change the name of the column "venue" to "stadium"
     # both in train and test set.
     for df in [train, test]:
         df.rename(columns={'venue':'stadium'}, inplace=True)
 
+    # Concatonate train and test into combine
     combine = pd.concat([train, test], ignore_index=True)
 
     # Change the order of the columns
@@ -148,7 +149,7 @@ def load_and_merge_initial_data():
     # Drop all duplicates in capacity
     capacity.drop_duplicates(inplace=True)
 
-    # merge the stadium data back in!
+    # Merge the stadium data back in!
     combine = combine.merge(capacity, how='left', on='stadium')
 
     return combine
