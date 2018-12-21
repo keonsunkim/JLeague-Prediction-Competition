@@ -16,4 +16,12 @@ temperature        : Farenheit, the temperate when the match held
 humidity           : humidity when the match held
 broadcaster        : name of the broadcast chaneel 
 capacity           : how many people can the stadium can accomodate
+description        : denote the name of the holiday if the match held
+                     on holiday
+is_holiday         : whether the match held in holiday (1 : Yes, 0  : False)
+is_dayoff          : whether the match held in dayoff (1 : Yes, 0  : False)
+After_is_dayoff    : How many days past from the last dayoff
+Before_is_dayoff   : How many days left before the next dayoff
+After_is_holiday   : How many days past from the last holiday
+Before_is_holiday  : How many days left before the next hoilday 
 '''
