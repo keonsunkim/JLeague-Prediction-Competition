@@ -157,6 +157,7 @@ def load_and_merge_original_data():
     combine['match_date'] = pd.to_datetime( combine['match_date'] )
     return combine
 
+combine  = load_and_merge_initial_data()
 #######################################################################
 #######################################################################
 ############ STEP 2 Set Extra Data J1, J2 League From 1993 ############
@@ -641,7 +642,6 @@ def add_holiday_feauture(df):
     date_df['is_holiday'] = date_df['description'].notnull().astype(np.int8)
     date_df['is_dayoff'] = date_df['is_Weekend'] + date_df['is_holiday']
 
-
     # Use get_elapsed function from util.py 
     # and calculate how many days left before next day off and
     # how many days passed from the last day off
@@ -667,6 +667,7 @@ def add_holiday_feauture(df):
 
     return df
 
+combine = add_holiday_feauture(combine, holiday)
 #######################################################################
 #######################################################################
 ###### STEP 9 Simple and Exponentially Weighted Win Ratio For Teams ###
@@ -686,18 +687,20 @@ def set_th_match(df):
     """
 
     board1 = df[
-        ['id', 'match_Year', 'match_date', 'home_team']
-    ].drop_duplicates().rename(columns={'home_team': 'team'})
-
-    board1['home_game'] = 1
+        ['match_Year', 'match_date', 'home_team']
+    ].rename(columns={'home_team': 'team'})
 
     board2 = df[
-        ['id', 'match_Year', 'match_date', 'away_team']
-    ].drop_duplicates().rename(columns={'away_team': 'team'})
+            ['match_Year', 'match_date', 'away_team']
+        ].rename(columns={'away_team': 'team'})
 
+    board1['home_game'] = 1
     board2['away_game'] = 1
 
     board = pd.concat([board1, board2])
+    board.sort_values(by='match_date', inplace=True)
+    board = reset_index(board)
+    
     """
     we had two columns which consists data about the team of the match.
     away_team and home_team. However we set them into the same column
@@ -706,235 +709,52 @@ def set_th_match(df):
 
     board['home_game'] = board['home_game'].fillna(0)
     board['away_game'] = board['away_game'].fillna(0)
+    
+    new_dataset = pd.DataFrame()
+    
+    start_year, end_year = board['match_Year'].min(), board['match_Year'].max()
 
-    for sea in range(1993, 2019):
-        teams = board.loc[(board['match_Year'] == sea),
-                          'team'].unique().tolist()
+    for year in tqdm_notebook( range(start_year, end_year+1 ) ):
 
-        for team in teams:
-            temp = board.loc[(board['match_Year'] == sea)
-                             & (board['team'] == team)]
+        year_df = board[board['match_Year']==year].copy()
+
+        unique_team = np.unique(year_df['team'])
+
+        for team in tqdm_notebook( unique_team ):
+            temp = year_df[(year_df['match_Year'] == year)
+                             & (year_df['team'] == team)]
+
             for i, row in temp.iterrows():
                 match_date = row['match_date']
-                board.loc[board.index == i, 'section'] = \
-                    len(
-                        temp.loc[(temp['match_Year'] == sea)
-                                 & (temp['match_date'] < match_date)
-                                 & (temp['team'] == team)
-                                 ]
-                )
+                temp.loc[ i, 'th_game'] = int( len( temp[temp['match_date'] < match_date])  ) + 1 
+
+            new_dataset = pd.concat([new_dataset, temp])
+
     # for all years in the dataset, count how many games a team had
     # before each game put them in the 'section' column
+    
+    # Make the home_th_game column
+    drop_cols = ['away_game','home_game','team']
+    
+    df  = df.merge(new_dataset[new_dataset['home_game']==1].drop('match_Year',1) , 
+                   left_on  = ['match_date','home_team'],
+                   right_on = ['match_date','team'], how='left' )
 
-    board.loc[board.home_game == 1, 'home_th_match'] = board.loc[
-        board.home_game == 1, 'section']
-    board.loc[board.away_game == 1, 'away_th_match'] = board.loc[
-        board.away_game == 1, 'section']
-    # divide the data for home_teams and away_teams
+    df.drop(drop_cols,1, inplace=True)
+    df.rename(columns={'th_game':'home_th_game'}, inplace=True)
+    
+    # Make the away_th_game column
+    df  = df.merge(new_dataset[new_dataset['away_game']==1].drop('match_Year',1) , 
+              left_on  = ['match_date','away_team'],
+              right_on = ['match_date','team'], how='left' )
 
-    away_match = board.loc[(board.away_game == 1)][['id', 'away_th_match']]
-    home_match = board.loc[(board.home_game == 1)][['id', 'home_th_match']]
-    df = df.merge(away_match, how='left', on='id')
-    df = df.merge(home_match, how='left', on='id')
-
-    return df
-
-
-def set_simple_win_ratio(df):
-    """
-    Warning!!! THIS FUNCTION IS EXTREMELY SLOW!!!!
-    This function gets the simple win ratio for home and awayteams
-    The code is extremely long thus I believe it deserves some
-    explanation
-    """
-
-    in_match = pd.read_csv('match_reports.csv')
-    out_match = pd.read_csv('ex_match_reports.csv')
-
-    match = pd.concat([in_match, out_match])
-    match = match.drop_duplicates(subset='id').sort_values(by='id')
-    # load the match result data to find which team won and lost
-
-    def df_of_prev_games_team_for_ratio(match_date,
-                                        division,
-                                        team,
-                                        num_of_prev_games_to_consider,
-                                        match_Year,
-                                        df_of_match_result,
-                                        df_of_game_sections):
-
-        # this function gets the previous games of a team so that
-        # the win loss occurences can be calculated. for each row of
-        # the df
-
-        df_of_prev_games = df_of_game_sections[
-            (df_of_game_sections['division'] == division)
-            & (df_of_game_sections['match_Year'] == match_Year)
-            & (df_of_game_sections['match_date'] < match_date)
-        ]
-        # first prepare by division, match_Year and all matches before
-        # the date
-
-        df_of_prev_games_with_match_results = df_of_prev_games[
-            (df_of_prev_games['home_team'] == team)
-            | (df_of_prev_games['away_team'] == team)
-        ].sort_values(by=['match_date']
-                      ).tail(num_of_prev_games_to_consider)
-        # then get all the games for the designated team and cut them
-        # by the value we have set.
-
-        df_of_prev_games_with_match_results = \
-            df_of_prev_games_with_match_results.merge(
-                df_of_match_result, on='id', how='left')
-        # then merge it with the result data
-
-        # return False if we don't have enough games.
-        # ex) win_ratio for 3G needs at least 3 previous games of a
-        # team.
-        # if this is the second game of a team, this function will
-        # return False
-        if df_of_prev_games_with_match_results.shape[0] \
-                < num_of_prev_games_to_consider:
-            game_number_satisfied = False
-            return game_number_satisfied, df_of_prev_games_with_match_results
-
-        else:
-            game_number_satisfied = True
-            return game_number_satisfied, df_of_prev_games_with_match_results
-
-    def win_ratio_calc(df, team, game_number_satisfied,
-                       num_of_prev_games_to_consider):
-        # this function calculates the win_ratio of the team
-        # from the df given by the
-        # "df_of_prev_games_team_for_ratio" function above
-
-        if game_number_satisfied:
-            win_freq = int(
-                df[(df['away_team'] == team) & (df['away_team_score']
-                                                > df['home_team_score'])].shape[0])
-            + int(
-                df[(df['home_team'] == team) & (df['away_team_score']
-                                                < df['home_team_score'])].shape[0])
-
-            draw_freq = int(
-                df[df['away_team_score'] == df['home_team_score']].shape[0])
-
-            win_ratio = (win_freq + (draw_freq * 0.5)) / \
-                num_of_prev_games_to_consider
-
-        # calculate the ratio in the if statement above
-            return win_ratio
-        else:
-            win_ratio = None
-            return win_ratio
-
-    def win_ratio_for_team(row, home_or_away,
-                           df_of_match_result,
-                           df_of_game_sections,
-                           num_of_prev_games_to_consider):
-
-        # This function combines the two functions above and returns
-        # the win_loss ratio for a given team!
-
-        if home_or_away == 'home':
-            team = row.home_team
-        elif home_or_away == 'away':
-            team = row.away_team
-
-        # set which team of the row will have their win loss ratio
-        # calculated
-
-        # get the win-ratio for both home and away teams in a given
-        # game
-        match_Year = row.match_Year
-        match_date = row.match_date
-        division = row.division
-
-        game_num_satisfied, df_for_win_ratio_calc = \
-            df_of_prev_games_team_for_ratio(
-                match_date=match_date,
-                division=division, team=team,
-                num_of_prev_games_to_consider=num_of_prev_games_to_consider,
-                match_Year=match_Year,
-                df_of_match_result=df_of_match_result,
-                df_of_game_sections=df_of_game_sections
-            )
-
-        win_ratio = win_ratio_calc(
-            df=df_for_win_ratio_calc,
-            team=team,
-            game_number_satisfied=game_num_satisfied,
-            num_of_prev_games_to_consider=num_of_prev_games_to_consider)
-
-        return win_ratio
-
-    # Finally get the win ratio for both home and away teams
-    df['home_team_avg_win_ratio_3G'] = df.apply(
-        lambda row: win_ratio_for_team(
-            row=row, home_or_away='home', df_of_match_result=match,
-            df_of_game_sections=df, num_of_prev_games_to_consider=3
-        ), axis=1
-    )
-
-    df['away_team_avg_win_ratio_3G'] = df.apply(
-        lambda row: win_ratio_for_team(
-            row=row, home_or_away='away', df_of_match_result=match,
-            df_of_game_sections=df, num_of_prev_games_to_consider=3
-        ), axis=1
-    )
-
-    print("Simple Win 3G is DONE!!")
-
-    df['home_team_avg_win_ratio_5G'] = df.apply(
-        lambda row: win_ratio_for_team(
-            row=row, home_or_away='home', df_of_match_result=match,
-            df_of_game_sections=df, num_of_prev_games_to_consider=5
-        ), axis=1
-    )
-
-    df['away_team_avg_win_ratio_5G'] = df.apply(
-        lambda row: win_ratio_for_team(
-            row=row, home_or_away='away', df_of_match_result=match,
-            df_of_game_sections=df, num_of_prev_games_to_consider=5
-        ), axis=1
-    )
-
-    print("Simple Win 5G is DONE!!")
-
-    df['home_team_avg_win_ratio_7G'] = df.apply(
-        lambda row: win_ratio_for_team(
-            row=row, home_or_away='home', df_of_match_result=match,
-            df_of_game_sections=df, num_of_prev_games_to_consider=7
-        ), axis=1
-    )
-
-    df['away_team_avg_win_ratio_7G'] = df.apply(
-        lambda row: win_ratio_for_team(
-            row=row, home_or_away='away', df_of_match_result=match,
-            df_of_game_sections=df, num_of_prev_games_to_consider=7
-        ), axis=1
-    )
-
-    print("Simple Win 7G is DONE!!")
-
-    df['home_team_avg_win_ratio_9G'] = df.apply(
-        lambda row: win_ratio_for_team(
-            row=row, home_or_away='home', df_of_match_result=match,
-            df_of_game_sections=df, num_of_prev_games_to_consider=9
-        ), axis=1
-    )
-
-    df['away_team_avg_win_ratio_9G'] = df.apply(
-        lambda row: win_ratio_for_team(
-            row=row, home_or_away='away', df_of_match_result=match,
-            df_of_game_sections=df, num_of_prev_games_to_consider=9
-        ), axis=1
-    )
-
-    print("Simple Win 9G is DONE!!")
+    df.drop(drop_cols,1, inplace=True)
+    df.rename(columns={'th_game':'away_th_game'}, inplace=True)
 
     return df
 
+# Run set_th_match
+combine =set_th_match(combine)
 
 def set_exp_win_ratio(df):
     """
@@ -1141,95 +961,83 @@ def set_exp_win_ratio(df):
 ############# prefuctures which Stadiums are located on ###############
 #######################################################################
 
-def set_population_data(df):
-    """
-    Set population data for each stadiums to get how many
-    people are living in the prefucture which the stadium
-    is located at
-    """
-    df['match_date'] = pd.to_datetime(df['match_date'])
-    df['match_year'] = df['match_date'].dt.year
-    df['match_month'] = df['match_date'].dt.month
-    df['section'] = df['section'].apply(
-        lambda x: x[1:-1]).astype(np.int)
-
-    pop = pd.read_csv('Perfect_population.csv',
+# Load populdation data of Japan
+population = pd.read_csv('../add_extra_data/Perfect_population.csv',
                       usecols=[
                           'SURVEY YEAR', 'AREA Code', 'AREA',
                           'A1101_Total population (Both sexes)[person]'
                       ]
                       )
 
-    # load the population data!
-
-    pop = pop[pop['SURVEY YEAR'] >= 1992]
-    pop.columns = ['year', 'area_code', 'area', 'population']
-    pop['population'] = pop['population'].apply(
+def preprocess_population(df):
+    # Get only population data from 1992 and set the minto integers
+    # and then preprocess the population data!
+    df = df[df['SURVEY YEAR'] >= 1992]
+    df.columns = ['year', 'area_code', 'area', 'population']
+    df['population'] = df['population'].apply(
         lambda x: re.sub(',', '', x))
-    pop['population'] = pop['population'].astype(np.int)
-    pop = reset_index(pop)
-    # get only population data from 1992 and set the minto integers
+    df['population'] = df['population'].astype(np.int)
+    df = reset_index(df)
+    return df
 
-    # since we statistics japan does not yet offer data for
-    # year 2016 and 2018 we guess the population for the year!
-    change_ratio = (
-        1 + (
-            pop[
-                (pop['area'] == 'All Japan') & (pop['year'] == 2016)
-            ]['population'].values[0]
-            - pop[(pop['area'] == 'All Japan')
-                  & (pop['year'] == 2015)]['population'].values[0]
-        ) / pop[
-            (pop['area'] == 'All Japan')
-            & (pop['year'] == 2015)
+# Since we statistics japan does not yet offer data for
+# year 2016 and 2018 we guess the population for the year!
+def caculate_change_ratio(df, year):
+    assert type(year) == int
+    
+    change_ratio = 1 + (
+        df[
+            (df['area'] == 'All Japan') & (df['year'] == year+1)
         ]['population'].values[0]
-    )
+        - df[(df['area'] == 'All Japan')
+            & (df['year'] == year)]['population'].values[0]
+    ) / df[
+        (df['area'] == 'All Japan')
+        & (df['year'] == year)
+    ]['population'].values[0]
+    
+    last_index= len(df)
+    
+    return change_ratio, last_index
 
-    last_index = len(pop)
-
-    for ind, x in pop[pop['year'] == 2016].iterrows():
+def insert_unrecored_population_value(df, year, change_ratio, last_index):
+    for ind, x in df[df['year'] == year+1].iterrows():
+        
         vals = x['year'] + \
             1, x['area_code'], x['area'], x['population'] * change_ratio
 
-        pop.loc[last_index] = vals
-
+        df.loc[last_index] = vals
         last_index += 1
+        
+    return df
 
-    change_ratio = (
-        1 + (
-            pop[
-                (pop['area'] == 'All Japan') & (pop['year'] == 2017)
-            ]['population'].values[0]
-            - pop[(pop['area'] == 'All Japan')
-                  & (pop['year'] == 2016)]['population'].values[0]
-        ) / pop[
-            (pop['area'] == 'All Japan')
-            & (pop['year'] == 2016)]['population'].values[0]
-    )
+def get_nextyear_population(df, year):
+    change_ratio, last_index = caculate_change_ratio(df, year)
+    df = insert_unrecored_population_value(df, year, change_ratio, last_index)
+    return df
 
-    last_index = len(pop)
+def make_population_data(df):
+    """
+    Set population data for each stadiums to get how many
+    people are living in the prefucture which the stadium
+    is located at
+    """
 
-    for ind, x in pop[pop['year'] == 2017].iterrows():
-        vals = x['year'] + \
-            1, x['area_code'], x['area'], x['population'] * change_ratio
-
-        pop.loc[last_index] = vals
-
-        last_index += 1
-
-    pop_added = df.merge(
-        pop,
-        left_on=['match_year', 'venue_area_code'],
-        right_on=['year', 'area_code'],
-        how='left'
-    ).drop(['year', 'area_code'], 1)
-
-    del pop_added['area']
-
-    df = pop_added.copy()
+    df = preprocess_population(df)
+    df = get_nextyear_population(df,2015)
+    df = get_nextyear_population(df,2016)
 
     return df
 
+def merge_with_population_data(main_df, right_df):
+    df = pd.merge(main_df, right_df, left_on  = ['match_Year','stadium_area_code']
+                                , right_on = ['year', 'area_code']
+                                , how = 'left')
+    df = df.drop(['year','area','area_code'],1)
+    return df
+
+population = make_population_data(population)
+combine    = merge_with_population_data(combine, population)
 #######################################################################
 #######################################################################
 ############## STEP 11 Find Team's League 1 and 2 Years ago ###########
@@ -1579,95 +1387,6 @@ def set_process_weather_data(df):
 
 #######################################################################
 #######################################################################
-################## STEP 13 Process Broadcaster Data ###################
-#######################################################################
-#######################################################################
-
-
-def process_broadcasters(df):
-    df['broad_list'] = df.broadcasters.str.split('/')
-
-    nhk = set()
-    for i, row in df.iterrows():
-        broad_list = row['broad_list']
-        if type(broad_list) == list:
-            nhk.update(broad_list)
-
-    broadcast = list(nhk)
-    nhk_cast = [x for x in broadcast if 'ＮＨＫ' in x] + \
-        [x for x in broadcast if 'NHK' in x]
-    nhk_bs = [
-        'NHK-BSハイビジョン',
-        'NHK BS1 ※6 浦和がスルガ銀行チャンピオンシップ2017SAITAMAに出場のため、7月22日(土)に開催',
-        'NHK BS1(101ch)',
-        'NHK BS1(102ch)',
-        'NHK BS1 ※AFCチャンピオンズリーグ2018の影響により、C大阪vs鹿島は7月25日(水)に開催',
-        'NHK BS1(録)',
-        'NHK BS1 ※4 AFCチャンピオンズリーグ2016の影響により、浦和vsFC東京は6月22日(水)に開催',
-        'NHK BS1',
-        'ＮＨＫ\u3000ＢＳハイビジョン',
-        'ＮＨＫ\u3000ＢＳ１'
-    ]
-
-    pure_nhk = nhk_cast.copy()
-
-    # Extract NHK channels except for NHK BS
-    for x in nhk_bs:
-        pure_nhk.remove(x)
-
-    """
-    I saw the data, and found that normal NHK channels like NHK 総合 have
-    tendency shows games in unpopular times, like 2pm of weekday.
-    Also lot of local NHK channels just show the game of their local
-    teams.
-    So I thought that NHK channels are showing J-league games
-    regardless of the popularity of that game.
-    Hence, I excluded NHK channels when I count the number of
-    broadcasters in each game.
-    However, I made an exception for NHK BS channels since they are pay
-    channel, so they might have tendency to show games with popularity.
-    I also deleted DAZN and SKY perfect channels,
-    because they show almost every game so it is not good to calculate
-    popularity of game by counting it.
-    """
-
-    for i, row in df.iterrows():
-        broad_list = row['broad_list']
-        try:
-            df.loc[df.index == i, 'broad_list'] = \
-                df.loc[df.index == i, 'broad_list'].apply(
-                    lambda x: [a for a in x if 'スカ' not in a]
-            )
-
-            df.loc[df.index == i, 'broad_list'] = \
-                df.loc[df.index == i, 'broad_list'].apply(
-                    lambda x: [a for a in x if 'DAZN' not in a]
-            )
-
-            df.loc[df.index == i, 'broad_list'] = \
-                df.loc[df.index == i, 'broad_list'].apply(
-                    lambda x: [a for a in x if 'ＤＡＺＮ' not in a]
-            )
-
-            df.loc[df.index == i, 'broad_list'] = \
-                df.loc[df.index == i, 'broad_list'].apply(
-                lambda x: [a for a in x if a not in pure_nhk]
-            )
-
-        except:
-            df.loc[df.index == i, 'broad_list'] = np.NaN
-
-    df.loc[df.broad_list.notnull(), 'broad_num'] = df.loc[
-        df.broad_list.notnull(), 'broad_list'].apply(lambda x: len(x))
-
-    del df['broad_list'], df['broadcasters']
-
-    df_done = df.copy()
-
-    return df_done
-
-#######################################################################
-#######################################################################
 ############ STEP 14 Get Weather Oriented Data: Humidexes, etc ########
 #######################################################################
 #######################################################################
@@ -1749,610 +1468,6 @@ def set_weather_indexes(df):
 
     return df
 
-#######################################################################
-#######################################################################
-################### STEP 15 Get and Set Emperor Cup Data ##############
-#######################################################################
-#######################################################################
-
-
-def add_emperor_cup_data(df, crawling=False):
-    # Crawling
-    # Some pages have different html format, so crawling codes needed
-    # to be different.
-    # However codes for each format are almost same. But we didn't
-    # put them together by using for loop or 'try-except' method,
-    # because while we are using google colab we found some unstability
-    # while crawling data when we use that kind of method.
-    if crawling == True:
-        # 85th cup (2005)
-        time = '85'
-        url = 'https://ja.wikipedia.org/wiki/%E7%AC%AC{}%E5%9B%9E%E5%A4%A9%E7%9A\
-               %87%E6%9D%AF%E5%85%A8%E6%97%A5%E6%9C%AC%E3%82%B5%E3%83%83%E3%82%A\
-               B%E3%83%BC%E9%81%B8%E6%89%8B%E6%A8%A9%E5%A4%A7%E4%BC%9A'.format(
-            time)
-
-        r = requests.get(url)
-        r.encoding = 'utf-8'
-        html_doc = r.text
-
-        soup = BS(html_doc)
-
-        game_dates = []
-        home_teams = []
-        away_teams = []
-        home_scores = []
-        away_scores = []
-
-        for x in soup.find_all('li'):
-            try:
-                try:
-                    match_result = re.search(
-                        '\w+ \d - \d \w+',
-                        x.text)
-                    [0]
-
-                    home_team = re.search(
-                        '(\w+ *\w*) \d - \d (\w+ *\w*)',
-                        match_result
-                    ).groups()[0]
-
-                    away_team = re.search(
-                        '(\w+ *\w*) \d - \d (\w+ *\w*)',
-                        match_result
-                    ).groups()[1]
-
-                    home_score = re.search(
-                        '\w+ *\w* ((\d) - (\d)) \w+ *\w*',
-                        match_result
-                    ).groups()[1]
-
-                    away_score = re.search(
-                        '\w+ *\w* ((\d) - (\d)) \w+ *\w*',
-                        match_result
-                    ).groups()[2]
-
-                    home_teams.append(home_team)
-                    away_teams.append(away_team)
-                    home_scores.append(home_score)
-                    away_scores.append(away_score)
-                    game_dates.append(nan)
-
-                except:
-                    match_result = re.search(
-                        '\w+ \d - \d（延長\d - \d） \w+',
-                        x.text
-                    )[0]
-                    home_team = re.search(
-                        '(\w+) \d - \d（延長\d - \d） (\w+)',
-                        match_result
-                    ).groups()[0]
-                    away_team = re.search(
-                        '(\w+) \d - \d（延長\d - \d） (\w+)',
-                        match_result
-                    ).groups()[1]
-                    home_score = re.search(
-                        '(\w+) ((\d) - (\d))（延長\d - \d） (\w+)',
-                        match_result
-                    ).groups()[2]
-                    away_score = re.search(
-                        '(\w+) ((\d) - (\d))（延長\d - \d） (\w+)',
-                        match_result
-                    ).groups()[3]
-
-                    home_teams.append(home_team)
-                    away_teams.append(away_team)
-                    home_scores.append(home_score)
-                    away_scores.append(away_score)
-                    game_dates.append(nan)
-
-            except:
-                continue
-
-        for x in soup.find_all('div', {'style': 'text-align:right'}):
-            date_raw = x.text
-            game_date = date_raw.split('日')[0] + '日'
-            game_dates.append(game_date)
-
-        for x in soup.find_all('span',
-                               {'class': 'summary',
-                                'style': "display: none;"}):
-            match_up = x.text
-            home_team = match_up.split(' v ')[0]
-            away_team = match_up.split(' v ')[1]
-
-            home_teams.append(home_team)
-            away_teams.append(away_team)
-
-        game_dates_fixed = ['-'] * (len(home_teams)
-                                    - len(game_dates)) + game_dates
-
-        for x in soup.find_all('th', {'style': 'width:22%; text-align:center'}):
-            score = x.text
-            home_score = score.split(' - ')[0]
-            away_score = score.split(' - ')[1].split(' (')[0].rstrip()
-
-            home_scores.append(home_score)
-            away_scores.append(away_score)
-
-        emperor_85 = pd.DataFrame(
-            data={
-                'game_date': game_dates_fixed,
-                'home_team': home_teams,
-                'away_team': away_teams,
-                'home_score': home_scores,
-                'away_score': away_scores
-            }
-        )
-
-        emperor_85 = emperor_85[-15:]
-        emperor_85.reset_index(inplace=True)
-        del emperor_85['index']
-
-        emperor_85.iloc[:7]['game_date'] = '2005年12月10日'
-        emperor_85.iloc[7]['game_date'] = '2005年12月17日'
-
-        # 86 ~ 96th cup (2006~16)
-        emperor = emperor_85.copy()
-
-        for t in range(86, 97):
-            time = str(t)
-            url = 'https://ja.wikipedia.org/wiki/%E7%AC%AC{}%E5%9B%9E%E5%A4%A9%E7\
-                   %9A%87%E6%9D%AF%E5%85%A8%E6%97%A5%E6%9C%AC%E3%82%B5%E3%83%83%E\
-                   3%82%AB%E3%83%BC%E9%81%B8%E6%89%8B%E6%A8%A9%E5%A4%A7%E4%BC%9A'\
-                   .format(time)
-
-            r = requests.get(url)
-            r.encoding = 'utf-8'
-            html_doc = r.text
-
-            soup = BS(html_doc)
-
-            game_dates = []
-            home_teams = []
-            away_teams = []
-            home_scores = []
-            away_scores = []
-
-            for x in \
-                    soup.find_all(
-                        'td',
-                        {'style': 'width:13%; \
-                         vertical-align:top; \
-                         text-align:center;'}):
-                home_score = re.search('(\d{1}) - (\d{1})', x.text).groups()[0]
-                away_score = re.search('(\d{1}) - (\d{1})', x.text).groups()[1]
-                home_scores.append(home_score)
-                away_scores.append(away_score)
-
-            for round_raw in \
-                    soup.find_all(
-                        'td',
-                        {'style': "width:17%; \
-                         vertical-align:top; \
-                         text-align:right;"}):
-                raw_data = round_raw.text.split(' ')
-                if int(time) in range(92, 97):
-                    game_date = raw_data[1].split('(')[0].rstrip()
-                elif int(time) in range(87, 92):
-                    game_date = raw_data[1].split('[')[0].rstrip()
-                elif int(time) < 87:
-                    game_date = raw_data[0]
-                game_dates.append(game_date)
-
-            for i, team in enumerate(
-                    soup.find_all('span', {'class': 'fn org'})):
-                team = team.text
-                if i % 2 == 0:
-                    home_teams.append(team)
-                else:
-                    away_teams.append(team)
-
-            game_nums = [x for x in range(1, len(game_dates) + 1)]
-
-            temp = pd.DataFrame(
-                data={
-                    'game_date': game_dates,
-                    'home_team': home_teams,
-                    'away_team': away_teams,
-                    'home_score': home_scores,
-                    'away_score': away_scores
-                })[-15:]
-
-            emperor = pd.concat([emperor, temp])
-
-        # 97th cup (2017)
-        time = 97
-        url = 'https://ja.wikipedia.org/wiki/%E7%AC%AC{}%E5%9B%9E%E5%A4%A9%E7%9A%\
-               87%E6%9D%AF%E5%85%A8%E6%97%A5%E6%9C%AC%E3%82%B5%E3%83%83%E3%82%AB%\
-               E3%83%BC%E9%81%B8%E6%89%8B%E6%A8%A9%E5%A4%A7%E4%BC%9A'\
-               .format(time)
-
-        r = requests.get(url)
-        r.encoding = 'utf-8'
-        html_doc = r.text
-
-        soup = BS(html_doc)
-
-        game_nums = []
-        game_dates = []
-        home_teams = []
-        away_teams = []
-        home_scores = []
-        away_scores = []
-
-        for x in \
-                soup.find_all(
-                'td',
-                {'style': 'width:13%; \
-                vertical-align:top; \
-                text-align:center;'}):
-            if len(x.text) < 3:
-                home_score = nan
-                away_score = nan
-                home_scores.append(home_score)
-                away_scores.append(away_score)
-            else:
-                home_score = re.search('(\d{1}) - (\d{1})', x.text).groups()[0]
-                away_score = re.search('(\d{1}) - (\d{1})', x.text).groups()[1]
-                home_scores.append(home_score)
-                away_scores.append(away_score)
-
-        final_score = re.search(
-            '\d{1} - \d{1}',
-            soup.find('th', {'style': "width:22%; text-align:center"}).text
-        )[0]
-
-        final_home_score = final_score.split(' - ')[0]
-        final_away_score = final_score.split(' - ')[1]
-        home_scores.append(final_home_score)
-        away_scores.append(final_away_score)
-
-        for round_raw in \
-                soup.find_all(
-                    'td',
-                    {'style': "width:17%; \
-                	vertical-align:top; \
-                	text-align:right;"}):
-            raw_data = round_raw.text.split(' ')
-            game_num = raw_data[0].split('.')[1]
-            game_date = raw_data[1].split('(')[0].rstrip()
-            game_nums.append(game_num)
-            game_dates.append(game_date)
-
-        final_date = re.search(
-            '\w+日', soup.find('div', {'style': 'text-align:right'}).text
-        )[0]
-
-        game_dates.append(final_date)
-        final_num = re.search(
-            'No.(\d+)',
-            soup.find(
-                'div',
-                {'style': 'text-align:right'}).text)[0].split('.')[1]
-
-        game_nums.append(final_num)
-
-        for i, team in enumerate(soup.find_all('span', {'class': 'fn org'})):
-            team = team.text
-            if i % 2 == 0:
-                home_teams.append(team)
-            else:
-                away_teams.append(team)
-
-        emperor_97 = pd.DataFrame(
-            data={
-                'game_date': game_dates,
-                'home_team': home_teams,
-                'away_team': away_teams,
-                'home_score': home_scores,
-                'away_score': away_scores})[-15:]
-
-        emperor = pd.concat([emperor, emperor_97])
-
-        # 98th cup (2018)
-        time = 98
-        url = 'https://ja.wikipedia.org/wiki/%E7%AC%AC{}%E5%9B%9E%E5%A4%A9%E7%9A%\
-               87%E6%9D%AF%E5%85%A8%E6%97%A5%E6%9C%AC%E3%82%B5%E3%83%83%E3%82%AB%\
-               E3%83%BC%E9%81%B8%E6%89%8B%E6%A8%A9%E5%A4%A7%E4%BC%9A'.\
-            format(time)
-
-        r = requests.get(url)
-        r.encoding = 'utf-8'
-        html_doc = r.text
-
-        soup = BS(html_doc)
-
-        game_nums = []
-        game_dates = []
-        home_teams = []
-        away_teams = []
-        home_scores = []
-        away_scores = []
-
-        for x in \
-                soup.find_all(
-                    'td',
-                    {'style': 'width:13%; \
-                	vertical-align:top; \
-                	text-align:center;'}):
-            if len(x.text) < 3:
-                home_score = np.nan
-                away_score = np.nan
-                home_scores.append(home_score)
-                away_scores.append(away_score)
-            else:
-                home_score = re.search('(\d{1}) - (\d{1})', x.text).groups()[0]
-                away_score = re.search('(\d{1}) - (\d{1})', x.text).groups()[1]
-                home_scores.append(home_score)
-                away_scores.append(away_score)
-
-        for round_raw in \
-            soup.find_all(
-                'td',
-                {'style': "width:17%; \
-        	    vertical-align:top; \
-        	    text-align:right;"}):
-            raw_data = round_raw.text.split(' ')
-            game_num = raw_data[0].split('.')[1]
-            game_date = raw_data[1].split('(')[0].rstrip()
-            game_nums.append(game_num)
-            game_dates.append(game_date)
-
-        for i, team in enumerate(soup.find_all('span', {'class': 'fn org'})):
-            team = team.text
-            if i % 2 == 0:
-                home_teams.append(team)
-            else:
-                away_teams.append(team)
-
-        game_dates.insert(56, '2018年6月6日')
-        home_scores.insert(56, '1')
-        away_scores.insert(56, '1')
-
-        emperor_98 = pd.DataFrame(
-            data={
-                'game_date': game_dates,
-                'home_team': home_teams,
-                'away_team': away_teams,
-                'home_score': home_scores,
-                'away_score': away_scores})[-15:]
-
-        emperor = pd.concat([emperor, emperor_98])
-
-    else:
-        # we could or just load things!
-        print('selected not to crawl emperor cup data, load!')
-        emperor = pd.read_csv('emperor.csv')
-    # Merging to main dataset
-    temp = emperor.copy().dropna()
-    temp.reset_index(inplace=True)
-    del temp['index']
-    temp['game_date'] = temp['game_date'].apply(lambda x: x.rstrip())
-    temp['game_date'] = temp['game_date'].apply(
-        lambda x: '-'.join([z.zfill(2) for z in re.findall('\d+', x)]))
-    temp.home_score = temp.home_score.astype(int)
-    temp.away_score = temp.away_score.astype(int)
-
-    team_name_before = [
-        'FC東京', '福島ユナイテッドFC', '湘南ベルマーレ', 'モンテディオ山形', '大分トリニータ', '明治大学',
-        'ギラヴァンツ北九州', '水戸ホーリーホック', '横浜F･マリノス', '清水エスパルス', '徳島ヴォルティス',
-        'サガン鳥栖', 'ザスパ草津', '京都サンガF.C.', '鹿島アントラーズ', 'アビスパ福岡', 'ジェフユナイテッド千葉',
-        'セレッソ大阪', 'アルビレックス新潟', 'AC長野パルセイロ', '大宮アルディージャ', 'ベガルタ仙台', '柏レイソル',
-        '筑波大学', '川崎フロンターレ', '愛媛FC', 'ロアッソ熊本', 'ザスパクサツ群馬', 'ガンバ大阪',
-        'ヴィッセル神戸', 'サンフレッチェ広島', 'ジェフ千葉', '横浜F・マリノス', 'FC岐阜', '浦和レッズ',
-        'コンサドーレ札幌', 'Honda FC', '横河武蔵野FC', 'ジュビロ磐田', '松本山雅FC', 'V・ファーレン長崎',
-        '名古屋グランパスエイト', 'ヴァンフォーレ甲府', 'FC町田ゼルビア', '横浜FC', '名古屋グランパス',
-        '東京ヴェルディ', '北海道コンサドーレ札幌', 'マリノス'
-    ]
-
-    team_name_after = [
-        'FC東京', '福島ユナイテッドFC', '湘南', '山形', '大分', '明治大学', '北九州', '水戸', '横浜FM',
-        '清水', '徳島', '鳥栖', '群馬', '京都.', '鹿島', '福岡', '千葉', 'Ｃ大阪', '新潟',
-        'AC長野パルセイロ', '大宮', '仙台', '柏', '筑波大学', '川崎Ｆ', '愛媛', '熊本', '群馬', 'Ｇ大阪',
-        '神戸', '広島', '千葉', '横浜FM', '岐阜', '浦和', '札幌', 'Honda FC', '横河武蔵野FC',
-        '磐田', '松本', '長崎', '名古屋', '甲府', '町田', '横浜FC', '名古屋', '東京Ｖ', '札幌',
-        '横浜FM'
-    ]
-
-    team_name_changer = dict(zip(team_name_before, team_name_after))
-    temp['home_team'] = \
-        temp['home_team'].apply(lambda x: team_name_changer[x])
-    temp['away_team'] = \
-        temp['away_team'].apply(lambda x: team_name_changer[x])
-
-    temp['season'] = temp['game_date'].apply(lambda x: int(x.split('-')[0]))
-    temp.loc[temp.game_date.str.endswith('-01-01'), 'season'] -= 1
-
-    # Calculate the result of game by using score of both team.
-    home_emp = temp[['game_date', 'home_team',
-                     'home_score', 'away_score', 'season']]
-    home_emp['criteria'] = home_emp['home_score'] - home_emp['away_score']
-    del home_emp['home_score'], home_emp['away_score']
-
-    away_emp = temp[['game_date', 'away_team',
-                     'home_score', 'away_score', 'season']]
-    away_emp['criteria'] = away_emp['away_score'] - away_emp['home_score']
-    del away_emp['home_score'], away_emp['away_score']
-
-    home_alive = []
-    home_dead = []
-
-    for i, row in home_emp.iterrows():
-        if str(row['criteria']) != '0':
-            continue
-        else:
-
-            if row['home_team'] in \
-                    list(
-                        temp.loc[(temp.index > i) & (temp.season == row['season']),
-                                 'home_team'].values) \
-                    + list(
-                        temp.loc[(temp.index > i) & (temp.season == row['season']),
-                                 'away_team'].values):
-                home_alive.append(i)
-            else:
-                home_dead.append(i)
-
-    home_emp.loc[home_emp.index.isin(home_alive), 'criteria'] = 10
-    home_emp.loc[home_emp.index.isin(home_dead), 'criteria'] = -10
-
-    away_alive = []
-    away_dead = []
-
-    for i, row in away_emp.iterrows():
-        if str(row['criteria']) != '0':
-            continue
-        else:
-            if row['away_team'] in \
-                list(
-                temp.loc[(temp.index > i) & (temp.season == row['season']),
-                         'home_team'].values) \
-                + list(temp.loc[(temp.index > i) & (temp.season == row['season']),
-                                'away_team'].values):
-                away_alive.append(i)
-            else:
-                away_dead.append(i)
-
-    away_emp.loc[away_emp.index.isin(away_alive), 'criteria'] = 10
-    away_emp.loc[away_emp.index.isin(away_dead), 'criteria'] = -10
-
-    emp = pd.concat(
-        [
-            home_emp.rename(columns={'home_team': 'team'}),
-            away_emp.rename(columns={'away_team': 'team'})
-        ]
-    ).sort_values(by='game_date')
-
-    df['season'] = df['match_Year']
-
-    emp_j1_teams = []
-    for t in emp.team.unique():
-        if t in df.home_team.unique().tolist():
-            emp_j1_teams.append(t)
-
-    emp['start_buff'] = np.nan
-    emp['end_buff'] = np.nan
-
-    # Start buff date: If teams proceeded to round 8, match date of round
-    # 16 will be date of start buff.
-    # End buff date: In case of teams who are not champions, last match of
-    # emperor cup of that season will be the day of the buff ends.
-    # In case of champion, the final match is first day of year, so we thought
-    # that the buff will effective until March, the early part of next season.
-    for team in emp_j1_teams:
-        for year in range(2005, 2019):
-            emp_dates = \
-                emp.loc[
-                    (emp.season == year) & (emp.team == team)
-                ]['game_date'].tolist()
-
-            emp_criteria = \
-                emp.loc[
-                    (emp.season == year) & (emp.team == team)
-                ]['criteria'].tolist()
-
-            if len(emp_dates) != 0:
-
-                # if the team losts at round 16, they can't get buff.
-                if emp_criteria[0] < 0:
-                    emp.loc[(emp.season == year) & (
-                        emp.team == team), 'start_buff'] = np.nan
-                elif True:
-                    emp.loc[
-                        (emp.season == year)
-                        & (emp.team == team),
-                        'start_buff'
-                    ] = emp_dates[0]
-                    for i, crt in enumerate(emp_criteria):
-
-                        # end day = the day team lost at emperor cup
-                        if crt < 0:
-                            emp.loc[
-                                (emp.season == year)
-                                & (emp.team == team),
-                                'end_buff'
-                            ] = emp_dates[i]
-
-    # buff for the round 8 teams at 2018: Round 8 was held at 11/21, so
-    # winners' buff are prolonged below.
-    emp.loc[(emp.start_buff.notnull()) & (
-        emp.end_buff.isnull()), 'end_buff'] = '2018-11-20'
-
-    df['home_emp'] = 0
-    df['away_emp'] = 0
-
-    emp_start_end = emp[[
-        'team',
-        'season',
-        'start_buff',
-        'end_buff'
-    ]].drop_duplicates().dropna()
-
-    # End buff; the day before the 2018 final of emperor cup
-
-    emp_start_end.loc[
-        (emp_start_end.team == '山形') & (emp_start_end.season == 2018),
-        'end_buff'
-    ] = '2018-12-15'
-    emp_start_end.loc[
-        (emp_start_end.team == '鹿島') & (emp_start_end.season == 2018),
-        'end_buff'
-    ] = '2018-12-15'
-    emp_start_end.loc[
-        (emp_start_end.team == '浦和') & (emp_start_end.season == 2018),
-        'end_buff'
-    ] = '2018-12-15'
-    emp_start_end.loc[
-        (emp_start_end.team == '甲府') & (emp_start_end.season == 2018),
-        'end_buff'
-    ] = '2018-12-15'
-
-    # As mentioned above, we thought that champion buff will be effective until March of next season,
-    # since they get AFC champions league ticket for next season and it might make them more popular.
-    # After many analysis, we decided that it is better to give buff only for
-    # champion of emperor cup each season.
-    for i, row in emp_start_end.iterrows():
-        end = row['end_buff']
-        if end.endswith('-01-01'):
-            team = row['team']
-            start = row['start_buff']
-            season = row['season']
-
-            df.loc[
-                (df['season'] == season) & (df['home_team'] == team)
-                & (df['match_date'] > start) & (df['match_date'] < end),
-                'home_emp'
-            ] = 1
-
-            df.loc[
-                (df['season'] == season) & (df['away_team'] == team)
-                & (df['match_date'] > start) & (df['match_date'] < end),
-                'away_emp'
-            ] = 1
-
-            df.loc[
-                (df['season'] == season + 1)
-                & (df['home_team'] == team)
-                & (df['match_date'] > start)
-                & (df['match_date'] < '{}-04-01'.format(str(season + 1))),
-                'home_emp'
-            ] = 1
-
-            df.loc[
-                (df['season'] == season + 1)
-                & (df['away_team'] == team)
-                & (df['match_date'] > start)
-                & (df['match_date'] < '{}-04-01'.format(str(season + 1))),
-                'away_emp'
-            ] = 1
-
-    df.loc[df.season < 2005, 'home_emp'] = np.nan
-    df.loc[df.season < 2005, 'away_emp'] = np.nan
-
-    df_done = df.copy()
-
-    return df_done
 
 #######################################################################
 #######################################################################
@@ -2389,504 +1504,6 @@ def set_first_last_game_dummy_hometeam(df):
     df['last_game_of_home_team'] = df['last_game_of_home_team'].fillna(0)
 
     return df
-
-#######################################################################
-#######################################################################
-######### STEP 17 Get and Set Data on Teams Playing AFC ###############
-#######################################################################
-#######################################################################
-
-
-def add_afc_data(df, crawling=False):
-    # Crawling data
-    # Like emperor cup, different pages required different codes.
-
-    # 2018
-    if crawling == True:
-        url = 'https://ja.wikipedia.org/wiki/AFC%E3%83%81%E3%83%A3%E3%83%B3%E3%83%\
-              94%E3%82%AA%E3%83%B3%E3%82%BA%E3%83%AA%E3%83%BC%E3%82%B02018_%E6%B1%\
-              BA%E5%8B%9D%E3%83%88%E3%83%BC%E3%83%8A%E3%83%A1%E3%83%B3%E3%83%88'
-
-        r = requests.get(url)
-        html_doc = r.text
-        soup = BS(html_doc)
-
-        game_dates = []
-        home_teams = []
-        away_teams = []
-        home_scores = []
-        away_scores = []
-
-        for x in soup.find_all('th', {'style': "width:22%; text-align:center"}):
-            score = x.text.split('(')[0]
-            home_score = score.split(' - ')[0]
-            away_score = score.split(' - ')[1].rstrip()
-            home_scores.append(home_score)
-            away_scores.append(away_score)
-
-        for x in \
-                soup.find_all('span', {'class': 'summary', 'style': 'display: none;'}):
-            try:
-                teams = x.text
-                home_team = teams.split('  v  ')[0]
-                away_team = teams.split('  v  ')[1]
-            except:
-                home_team = teams.split('  v ')[0]
-                away_team = teams.split('  v ')[1]
-
-            home_teams.append(home_team)
-            away_teams.append(away_team)
-
-        for x in soup.find_all('div', {'style': 'text-align:right'}):
-            game_date = x.text.split('日')[0] + '日'
-            game_dates.append(game_date)
-
-        afc_18 = pd.DataFrame(
-            data={
-                'game_date': game_dates,
-                'home_team': home_teams,
-                'away_team': away_teams,
-                'home_score': home_scores,
-                'away_score': away_scores
-            }
-        )
-
-        afc = afc_18[-14:]
-
-        # 2013 ~ 2017
-        for year in range(2013, 2018):
-            time = str(year)
-
-            url = 'https://ja.wikipedia.org/wiki/AFCチャンピオンズリーグ{}'.format(time)
-
-            r = requests.get(url)
-            html_doc = r.text
-            soup = BS(html_doc)
-
-            game_dates = []
-            home_teams = []
-            away_teams = []
-            home_scores = []
-            away_scores = []
-
-            for x in \
-                    soup.find_all('th', {'style': "width:22%; text-align:center"}):
-                score = x.text.split('(')[0]
-                try:
-                    home_score = score.split(' - ')[0]
-                    away_score = score.split(' - ')[1].rstrip()
-                except:
-                    home_score = score.split(' – ')[0]
-                    away_score = score.split(' – ')[1].rstrip()
-
-                home_scores.append(home_score)
-                away_scores.append(away_score)
-
-            for x in \
-                soup.find_all(
-                    'span',
-                    {'class': 'summary', 'style': 'display: none;'}):
-                teams = x.text
-                try:
-                    home_team = teams.split('  v  ')[0]
-                    away_team = teams.split('  v  ')[1]
-                except:
-                    try:
-                        home_team = teams.split('  v ')[0]
-                        away_team = teams.split('  v ')[1]
-                    except:
-                        try:
-                            home_team = teams.split('　 v  ')[0]
-                            away_team = teams.split('　 v  ')[1]
-                        except:
-                            home_team = teams.split(' v  ')[0]
-                            away_team = teams.split(' v  ')[1]
-
-                home_teams.append(home_team)
-                away_teams.append(away_team)
-
-            for x in soup.find_all('div', {'style': 'text-align:right'}):
-                game_date = x.text.split('日')[0] + '日'
-                game_dates.append(game_date)
-
-            df1 = pd.DataFrame(
-                data={
-                    'game_date': game_dates,
-                    'home_team': home_teams,
-                    'away_team': away_teams,
-                    'home_score': home_scores,
-                    'away_score': away_scores}
-            )[-14:]
-
-            afc = pd.concat([afc, df1])
-
-        # 2009~2012
-        for time in [str(x) for x in range(2009, 2013)]:
-
-            url = 'https://ja.wikipedia.org/wiki/AFCチャンピオンズリーグ{}'.format(time)
-
-            r = requests.get(url)
-            html_doc = r.text
-            soup = BS(html_doc)
-
-            game_dates = []
-            teams = []
-            home_teams = []
-            away_teams = []
-            home_scores = []
-            away_scores = []
-
-            for x in \
-                    soup.find_all('th', {'style': "width:22%; text-align:center"}):
-                score = x.text.split('(')[0]
-                try:
-                    home_score = score.split(' - ')[0]
-                    away_score = score.split(' - ')[1].rstrip()
-                except:
-                    try:
-                        home_score = score.split(' – ')[0]
-                        away_score = score.split(' – ')[1].rstrip()
-                    except:
-                        home_score = np.nan
-                        away_score = np.nan
-
-                home_scores.append(home_score)
-                away_scores.append(away_score)
-
-            for x in soup.find_all('span', {'class': 'fn org'}):
-                raw = x.find('a').text
-                teams.append(raw)
-
-            for i, x in enumerate(teams):
-                if i % 2 == 0:
-                    home_teams.append(x)
-                else:
-                    away_teams.append(x)
-
-            for x in soup.find_all('div', {'style': 'text-align:right'}):
-                game_date = x.text.split('日')[0] + '日'
-                game_dates.append(game_date)
-            try:
-
-                df2 = pd.DataFrame(
-                    data={
-                        'game_date': game_dates,
-                        'home_team': home_teams,
-                        'away_team': away_teams,
-                        'home_score': home_scores,
-                        'away_score': away_scores
-                    }
-                )[-13:]
-
-                afc = pd.concat([afc, df2])
-            except:
-                print(time)
-
-        # 2007~2008
-        for time in [str(x) for x in range(2007, 2009)]:
-
-            url = 'https://ja.wikipedia.org/wiki/AFCチャンピオンズリーグ{}'.format(time)
-
-            r = requests.get(url)
-            html_doc = r.text
-            soup = BS(html_doc)
-
-            game_dates = []
-            teams = []
-            home_teams = []
-            away_teams = []
-            home_scores = []
-            away_scores = []
-
-            for x in \
-                    soup.find_all('th', {'style': "width:22%; text-align:center"}):
-                score = x.text.split('(')[0]
-                try:
-                    home_score = score.split(' - ')[0]
-                    away_score = score.split(' - ')[1].rstrip()
-                except:
-                    try:
-                        home_score = score.split(' – ')[0]
-                        away_score = score.split(' – ')[1].rstrip()
-                    except:
-                        home_score = np.nan
-                        away_score = np.nan
-
-                home_scores.append(home_score)
-                away_scores.append(away_score)
-
-            for x in soup.find_all('span', {'class': 'fn org'}):
-                raw = x.find('a').text
-                teams.append(raw)
-
-            for i, x in enumerate(teams):
-                if i % 2 == 0:
-                    home_teams.append(x)
-                else:
-                    away_teams.append(x)
-
-            for x in soup.find_all('div', {'style': 'text-align:right'}):
-                game_date = x.text.split('日')[0] + '日'
-                game_dates.append(game_date)
-
-            try:
-                df3 = pd.DataFrame(
-                    data={
-                        'game_date': game_dates,
-                        'home_team': home_teams,
-                        'away_team': away_teams,
-                        'home_score': home_scores,
-                        'away_score': away_scores
-                    }
-                )[-14:]
-
-                afc = pd.concat([afc, df3])
-            except:
-                print(time)
-
-    else:
-        print('selected not to crawl afc data! loading!')
-        afc = pd.read_csv('afc.csv')
-
-    afc_df = afc.copy()
-
-    afc_df.loc[afc_df.away_score == '3（注）', 'away_score'] = '3'
-
-    afc_df['game_date'] = afc_df['game_date'].apply(lambda x: x.rstrip())
-    afc_df['game_date'] = afc_df['game_date'].apply(
-        lambda x: '-'.join([z.zfill(2) for z in re.findall('\d+', x)])
-    )
-
-    afc_df.home_score = afc_df.home_score.astype(int)
-    afc_df.away_score = afc_df.away_score.astype(int)
-
-    afc_df['season'] = afc_df['game_date'].apply(
-        lambda x: int(x.split('-')[0])
-    )
-
-    # afc_df = afc_df.sort_values(by='game_date')
-    afc_df.reset_index(inplace=True)
-    del afc_df['index']
-
-    afc_df.match_num = np.nan
-    for i, row in afc_df.iterrows():
-        season = row['season']
-        match_num = len(
-            afc_df.loc[(afc_df['season'] == season)
-                       & (afc_df.index < i)]
-        ) + 1
-
-        afc_df.loc[afc_df.index == i, 'match_num'] = match_num
-
-    # Method to calulate how far Japanese teams are went on AFC tournament
-    afc_df['until_8'] = 0
-    afc_df['until_semi'] = 0
-    afc_df['until_final'] = 0
-    afc_df['champ'] = 0
-
-    for i, row in afc_df.iterrows():
-        team = row['home_team']
-        num = row['match_num']
-        sea = row['season']
-        semi_list = list(
-            afc_df.loc[
-                (afc_df.season == sea)
-                & (afc_df['match_num'] > 8),
-                'home_team'
-            ].values
-        )
-
-        if num < 9:
-            if team not in semi_list:
-                afc_df.loc[afc_df.index == i, 'until_8'] = 1
-
-    for i, row in afc_df.iterrows():
-        team = row['home_team']
-        num = row['match_num']
-        sea = row['season']
-
-        if num == 9:
-            afc_df.loc[afc_df.index == i, 'away_team'] = \
-                afc_df.loc[
-                (afc_df.season == sea) & (afc_df['match_num'] == 11),
-                'home_team'
-            ].values[0]
-
-        elif num == 10:
-            afc_df.loc[afc_df.index == i, 'away_team'] = \
-                afc_df.loc[
-                (afc_df.season == sea) & (afc_df['match_num'] == 12),
-                'home_team'
-            ].values[0]
-
-        elif num == 11:
-            afc_df.loc[afc_df.index == i, 'away_team'] = \
-                afc_df.loc[
-                (afc_df.season == sea) & (afc_df['match_num'] == 9),
-                'home_team'
-            ].values[0]
-
-        elif num == 12:
-            afc_df.loc[afc_df.index == i, 'away_team'] = \
-                afc_df.loc[
-                (afc_df.season == sea) & (afc_df['match_num'] == 10),
-                'home_team'
-            ].values[0]
-
-    for i, row in afc_df.iterrows():
-        team = row['home_team']
-        num = row['match_num']
-        sea = row['season']
-        if sea not in range(2009, 2013):
-            final_list = list(
-                afc_df.loc[
-                    (afc_df.season == sea)
-                    & (afc_df['match_num'] > 12),
-                    'home_team'
-                ].values
-            )
-            if num > 8 and num < 13:
-                if team not in final_list:
-                    afc_df.loc[afc_df.index == i, 'until_semi'] = 1
-
-    afc_df.loc[
-        (afc_df.season == 2010)
-        & (afc_df['match_num'] == 9), 'until_semi'
-    ] = 1
-
-    afc_df.loc[
-        (afc_df.season == 2010)
-        & (afc_df['match_num'] == 10), 'until_semi'
-    ] = 1
-
-    # No Japanese clubs make good result at 2010~2012 season, so don't
-    # need to include data of that period.
-    afc_df = afc_df[(afc_df['season'] < 2010) | ((afc_df['season'] > 2012))]
-
-    for i, row in afc_df.iterrows():
-        team = row['home_team']
-        num = row['match_num']
-        sea = row['season']
-
-        if sea != 2009:
-            if num == 13:
-                afc_df.loc[afc_df.index == i, 'away_team'] = \
-                    afc_df.loc[
-                    (afc_df['season'] == sea) & (afc_df['match_num'] == 14),
-                    'home_team'
-                ].values[0]
-
-            if num == 14:
-                afc_df.loc[afc_df.index == i, 'away_team'] = \
-                    afc_df.loc[
-                    (afc_df['season'] == sea) & (afc_df['match_num'] == 13),
-                    'home_team'
-                ].values[0]
-
-    # Check Japanese clubs of AFC champion
-    until_final_index = []
-    champ_index = [12, 83, 149, 162]
-
-    afc_df.loc[afc_df.index.isin(champ_index), 'champ'] = 1
-
-    afc_df.start_buff = np.nan
-    afc_df.end_buff = np.nan
-
-    for i, row in afc_df.iterrows():
-        team = row['home_team']
-        num = row['match_num']
-        sea = row['season']
-        until_8 = row['until_8']
-        until_semi = row['until_semi']
-        until_final = row['until_final']
-        champ = row['champ']
-
-        afc_df.loc[afc_df.index == i, 'start_buff'] = \
-            afc_df.loc[
-                (afc_df['season'] == sea) & (afc_df['match_num'] == 1),
-                'game_date'
-        ].values[0]
-
-        if sea != 2009:
-            if until_8 == 1:
-                afc_df.loc[afc_df.index == i, 'end_buff'] = \
-                    afc_df.loc[
-                    (afc_df['season'] == sea) & (afc_df['match_num'] == 8),
-                    'game_date'
-                ].values[0]
-
-            elif until_semi == 1:
-                afc_df.loc[afc_df.index == i, 'end_buff'] = \
-                    afc_df.loc[
-                        (afc_df['season'] == sea) & (
-                            afc_df['match_num'] == 12),
-                        'game_date'
-                ].values[0]
-
-            elif until_final == 1:
-                afc_df.loc[afc_df.index == i, 'end_buff'] = \
-                    afc_df.loc[
-                        (afc_df['season'] == sea) & (
-                            afc_df['match_num'] == 14),
-                        'game_date'
-                ].values[0]
-
-            elif champ == 1:
-                afc_df.loc[afc_df.index == i, 'end_buff'] = str(sea) + '-12-31'
-
-    afc_df = afc_df.loc[(afc_df['champ'] == 1)]
-    afc_data = afc_df.dropna(subset=['end_buff'])[[
-        'game_date',
-        'home_team',
-        'start_buff',
-        'end_buff',
-        'season']]
-
-    afc_data.rename(columns={'home_team': 'team'}, inplace=True)
-
-    # Merging to dataset
-    # change team names to fit in existing dataset
-    jap_team = ['柏レイソル', 'ガンバ大阪',
-                '川崎フロンターレ', '浦和レッズ',
-                '浦和レッドダイヤモンズ', '鹿島アントラーズ']
-
-    afc_data = afc_data[afc_data.team.isin(jap_team)]
-
-    team_name_changed = ['柏', '大阪', '川崎Ｆ', '浦和', '浦和', '鹿島']
-
-    team_name_changer = dict(zip(jap_team, team_name_changed))
-
-    afc_data['team'] = afc_data['team'].apply(lambda x: team_name_changer[x])
-
-    # We thought that AFC champion teams get buff for the remained
-    # matches of that season.
-
-    df['home_afc'] = 0
-    df['away_afc'] = 0
-
-    for i, row in afc_data.iterrows():
-        team = row['team']
-        start = row['start_buff']
-        end = row['end_buff']
-        season = row['season']
-
-        df.loc[
-            (df['season'] == season) & (df['home_team'] == team)
-            & (df['match_date'] > start), 'home_afc'
-        ] = 1
-
-        df.loc[
-            (df['season'] == season) & (df['away_team'] == team)
-            & (df['match_date'] > start), 'away_afc'
-        ] = 1
-
-    # No AFC data before 2005, so make them null value.
-    df.loc[df['season'] < 2005, 'home_afc'] = np.nan
-    df.loc[df['season'] < 2005, 'away_afc'] = np.nan
-
-    df_done = df.copy()
-
-    return df_done
 
 
 #######################################################################
@@ -3512,105 +2129,84 @@ We skip from step 19 to 22 due to the fact that
 step 20, 21 is not needed to recreate the train data.
 They are Just Simply Not Used
 """
+# Yearly home , stadium's lag attendance
+def lag_year_hometeam_stadium_feature(df, lags, col):
+    temp = df[['match_Year', 'home_team', 'stadium', col]]
+    for i in lags:
+        shifted = temp.copy()
+        shifted.columns = ['match_Year', 'home_team',
+                        'stadium', col + '_Year_Stadium_Lag_' + str(i)]
+        shifted['match_Year'] += i
+                
+        shifted = shifted.groupby(
+            ['match_Year', 'home_team', 'stadium']
+        )[col + '_Year_Stadium_Lag_' + str(i)].mean().reset_index()
 
-
-def set_lagged_data(df):
-    for year in range(1994, 2019):
-        unique_team = df.loc[
-            df['match_Year'] == year, 'home_team'].unique()
-        unique_stadium = df.loc[
-            df['match_Year'] == year, 'venue'].unique()
-
-        for year_, team, stadium in product(
-                [str(year)], unique_team, unique_stadium):
-            for lag in range(1, 5):
-                # For Home
-                temp = df[(df['match_Year'] == int(year_) - lag)
-                          & (df['home_team'] == team)
-                          & (df['venue'] == stadium)]
-
-                if len(temp) != 0:
-                    mean_ = temp['attendance'].mean()
-                    df.loc[(df['match_Year'] == int(year_))
-                           & (df['home_team'] == team)
-                           & (df['venue'] == stadium),
-                           'Lag{}Year_home_stadium_Mean'.format(lag)
-                           ] = mean_
-                # For Away
-                temp = df[(df['match_Year'] == int(year_) - lag)
-                          & (df['away_team'] == team)
-                          & (df['venue'] == stadium)]
-
-                if len(temp) > 0:
-                    mean_ = temp['attendance'].mean()
-                    df.loc[(df['match_Year'] == int(year_))
-                           & (df['away_team'] == team)
-                           & (df['venue'] == stadium),
-                           'Lag{}Year_away_stadium_Mean'.format(lag)
-                           ] = mean_
-
-    # Yearly, Monthly home, away's lag attendance
-    for year in range(1993, 2019):
-        for year_, month, team in product(
-                [str(year)], [str(x) for x in range(2, 13)],
-                df.loc[df['match_Year'] == year,
-                       'home_team'].unique()):
-            for lag in range(1, 5):
-                # Home
-                temp = df[
-                    (df['match_Year'] == int(year_) - lag)
-                    & (df['match_Month'] == int(month))
-                    & (df['home_team'] == team)
-                ]
-
-                if len(temp) != 0:
-                    mean_ = temp['attendance'].mean()
-
-                    df.loc[
-                        (df['match_Year'] == int(year_))
-                        & (df['match_Month'] == int(month))
-                        & (df['home_team'] == team),
-                        'Lag{}Year_Month_Home_Mean'.format(lag)
-                    ] = mean_
-
-                # Away
-                temp = df[
-                    (df['match_Year'] == int(year_) - lag)
-                    & (df['match_Month'] == int(month))
-                    & (df['away_team'] == team)
-                ]
-
-                if len(temp) != 0:
-                    mean_ = temp['attendance'].mean()
-
-            df.loc[
-                (df['match_Year'] == int(year_))
-                & (df['match_Month'] == int(month)) & (df['away_team'] == team),
-                'Lag{}Year_Month_Away_Mean'.format(lag)
-            ] = mean_
-
-    def lag_feature(df, lags, col):
-        temp = df[['match_Year', 'home_team', 'away_team', col]]
-        for i in lags:
-            shifted = temp.copy()
-            shifted.columns = ['match_Year', 'home_team',
-                               'away_team', col + '_lag_' + str(i)]
-            shifted['match_Year'] += i
-
-            shifted = shifted.groupby(
-                ['match_Year', 'home_team', 'away_team']
-            )[col + '_lag_' + str(i)].mean().reset_index()
-
-            df = pd.merge(
-                df, shifted,
-                on=['match_Year', 'home_team', 'away_team'],
-                how='left'
-            )
-        return df
-
-    df = lag_feature(df, [1, 2, 3, 4], 'attendance')
+        df = pd.merge(
+            df, shifted,
+            on=['match_Year', 'home_team', 'stadium'],
+            how='left'
+        )
     return df
 
+# Yearly, Monthly home, away's lag attendance
+def lag_year_hometeam_awayteam_feature(df, lags, col):
+    temp = df[['match_Year', 'home_team', 'away_team', col]]
+    for i in lags:
+        shifted = temp.copy()
+        shifted.columns = ['match_Year', 'home_team',
+                        'away_team', col + '_Year_Hometeam_Awayteam_Lag_' + str(i)]
+        shifted['match_Year'] += i
+                
+        shifted = shifted.groupby(
+            ['match_Year', 'home_team', 'away_team']
+        )[col + '_Year_Hometeam_Awayteam_Lag_' + str(i)].mean().reset_index()
+
+        df = pd.merge(
+            df, shifted,
+            on=['match_Year', 'home_team', 'away_team'],
+            how='left'
+        )
+    return df
+
+def lag_year_month_hometeam_awayteam_feature(df, lags, col):
+    temp = df[['match_Year','match_Month','home_team', 'away_team', col]]
+    for i in lags:
+        shifted = temp.copy()
+        shifted.columns = ['match_Year', 'match_Month','home_team',
+                        'away_team', col + '_Year_Month_Hometeam_Awayteam_Lag_' + str(i)]
+        shifted['match_Year'] += i
+        
+        shifted = shifted.groupby(
+            ['match_Year', 'match_Month','home_team', 'away_team']
+        )[col + '_Year_Month_Hometeam_Awayteam_Lag_' + str(i)].mean().reset_index()
+
+        df = pd.merge(
+            df, shifted,
+            on=['match_Year','match_Month', 'home_team', 'away_team'],
+            how='left'
+        )
+    return df
+
+def make_lagged_feature(df, lags):
+    df = lag_year_hometeam_awayteam_feature(df, lags, 'attendance')
+    df = lag_year_month_hometeam_awayteam_feature(df, lags, 'attendance')
+    df = lag_year_hometeam_stadium_feature(df, lags, 'attendance')
+
+    return df
+
+combine = make_lagged_feature(combine, [1,2,3,4])
+
+
+
+######################################################################################
+######################################################################################
+######################################################################################
+######################################################################################
+######################################################################################
+######################################################################################
+######################################################################################
+######################################################################################
 
 def put_all_data_together(google_map_key):
 
