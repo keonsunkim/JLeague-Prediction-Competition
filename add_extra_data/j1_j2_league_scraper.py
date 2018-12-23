@@ -144,7 +144,7 @@ def scrape_jleague_match_data1(session, year, division):
 
 def scrape_jleague_match_data2(session, match_id):
     """ Scrapes jleague data from match detail page.
-    Detail Page example =
+    Detail Page example below
     "https://data.j-league.or.jp/SFMS02/?match_card_id=19075"
     """
 
