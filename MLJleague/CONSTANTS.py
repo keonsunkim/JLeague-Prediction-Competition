@@ -26,8 +26,6 @@ After_is_holiday   : How many days past from the last holiday
 Before_is_holiday  : How many days left before the next hoilday 
 '''
 
-from add_extra_data.j1_j2_league_scraper import *
-
 MATCH_REPORTS_COLUMNS = [
     'id', 'home_team_player11', 'home_team_player10', 'home_team_player9',
     'home_team_player8', 'home_team_player7', 'home_team_player6',
@@ -46,6 +44,3 @@ MATCH_COLUMNS = [
 ]
 
 same_team_dict = {}
-
-
-ask_scrape_loc_and_process_options

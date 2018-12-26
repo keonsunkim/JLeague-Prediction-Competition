@@ -1,6 +1,6 @@
 import sys
 
-from Scraper.j1j2scraper import main_scraper
+from MLJleague.Scraper.j1j2scraper import main_scraper
 
 
 scripts_dict = {'get_extra_data': main_scraper}
