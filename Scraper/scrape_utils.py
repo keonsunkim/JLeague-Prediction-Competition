@@ -16,9 +16,12 @@ def random_waiter(min, max):
     time.sleep(randrange(min, max) * 0.1)
 
 
-def clean_string(string, args):
-    string = re.sub('(,{}:?)', '', string)
-    return re.sub('(\s+)', ' ', string.strip())
+def clean_string(string):
+    if isinstance(string, str):
+        string = re.sub('(,{}:?)', '', string)
+        return re.sub('(\s+)', ' ', string.strip())
+    else:
+        return string
 
 
 def connection_checker(response):

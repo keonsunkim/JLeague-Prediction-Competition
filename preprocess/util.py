@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pandas.api.types import is_string_dtype, is_numeric_dtype
 import numpy as np
 
@@ -104,3 +106,7 @@ def get_elapsed(df, fld, pre):
 
     df[pre + '_' + fld] = res
     return df
+
+
+def path_configure(path, file_name=None):
+    folder = Path(path)

@@ -14,14 +14,17 @@ J1 and J2 league.
 """
 
 import os
+import sys
 import re
+from itertools import product
+from multiprocessing import Pool, cpu_count
 
 import requests
-
 import numpy as np
 import pandas as pd
 from bs4 import BeautifulSoup
-from scrape_utils import (
+
+from .scrape_utils import (
     random_waiter, check_and_find_html_elements,
     clean_string, connection_checker
 )
@@ -33,7 +36,7 @@ def process_table_for_jleague_data1(soup):
     column_and_table_order = (
         ('attendance', 9), ('division', 1), ('section_with_round', 2),
         ('home_team', 5), ('away_team', 7), ('broadcasters', 10),
-        ('score', 6), ('match_year', 0), ('month_day', 3), ('match_id', 6)
+        ('score', 6), ('match_year', 0), ('month_day', 3), ('id', 6)
     )
 
     # table_pd will end up being the returned table!
@@ -45,7 +48,7 @@ def process_table_for_jleague_data1(soup):
     # 'td' is the element of the row
     for tr in soup.find_all('tr'):
         td = tr.find_all('td')
-        td_list = [td[opt[1]].text.strip() if opt[0] != 'match_id' else td[opt[1]]
+        td_list = [td[opt[1]].text.strip() if opt[0] != 'id' else td[opt[1]]
                    for opt in column_and_table_order]
         data.append(td_list)
 
@@ -71,7 +74,7 @@ def process_table_for_jleague_data1(soup):
     table_pd['section'] = table_pd[
         'section_with_round'].str.extract(r'(第\d+節)')
 
-    table_pd['match_id'] = table_pd['match_id'].astype(
+    table_pd['id'] = table_pd['id'].astype(
         str).str.extract(r'/SFMS02/\?match_card_id=(\d+)')
     table_pd['home_team_score'] = table_pd['score'].astype(
         str).str.extract(r'(\d+)-')
@@ -86,32 +89,34 @@ def process_table_for_jleague_data1(soup):
 
 
 def process_table_for_jleague_data2(
-        match_id, home_team_soup, away_team_soup, stadium_soup):
-    """ Returns row data of a certain match_id
+        id, home_team_soup, away_team_soup, stadium_soup):
+    """ Returns row data of a certain id
     The order of the list is
-    [match_id, home_team_player 1 ~ 11, away_team_player 1~ 11,
+    [id, home_team_player 1 ~ 11, away_team_player 1~ 11,
     stadium_name, weather, temperature, humidity]
     """
 
-    # initiate a row starting with match_id
-    data_list = [match_id, ]
+    # initiate a row starting with id
+    data_list = [id, ]
 
     # add home team first then add away team players
-    for soup in [soup_contain_home_player_data, soup_contain_away_player_data]:
+    for soup in [home_team_soup, away_team_soup]:
         for tr in soup.find_all('tr'):
             td = tr.find_all('td')
             data_list.append(clean_string(
                 ' '.join([td[0].text, td[2].text, td[1].text])
             ))
 
-    for tr in soup_contain_stadium_data.find_all('tr'):
+    for tr in stadium_soup.find_all('tr'):
         td = tr.find_all('td')
         data_list.extend(
             map(clean_string, [td[2].text, td[4].text, td[5].text, td[6].text])
         )
 
+    return data_list
 
-def scrape_jleague_match_data1(session, year, division):
+
+def scrape_jleague_match_data1(session, year, division, **kwargs):
     """ Scrapes jleague data from table result page.
     Table page = "https://data.j-league.or.jp/SFMS01/search?"
     We still need data on weather, stadium name, temperature, humidity.
@@ -142,14 +147,14 @@ def scrape_jleague_match_data1(session, year, division):
     return processed_table
 
 
-def scrape_jleague_match_data2(session, match_id):
+def scrape_jleague_match_data2(session, id, **kwargs):
     """ Scrapes jleague data from match detail page.
     Detail Page example below
     "https://data.j-league.or.jp/SFMS02/?match_card_id=19075"
     """
 
     base_url = 'https://data.j-league.or.jp/SFMS02/?match_card_id='
-    r = sesstion.get(match_data + str(match_id))
+    r = session.get(base_url + str(id))
 
     # check if we recieved a success http_status_code
     connection_checker(r)
@@ -182,16 +187,64 @@ def scrape_jleague_match_data2(session, match_id):
     )
 
     processed_list = process_table_for_jleague_data2(
-        match_id,
+        id,
         soup_contain_home_player_data,
         soup_contain_away_player_data,
         soup_contain_stadium_data)
 
-    return pocessed_list
+    return processed_list
 
 
-if __name__ == '__main__':
-    scrape_options = {1: (1994, 2019), 2: (2000, 2019)}
+def ask_scrape_loc_and_process_options():
+
+    scrape_local_or_website_msg = (
+        'If you want to run scraping script with local files, enter "local"'
+        ', if you want to scrape directly from the website enter "website" : '
+    )
+
+    scrape_serial_or_multi_msg = (
+        'If you want to run your scraping script with multiprocessing enter '
+        '"multi", if you want to run it with single core, enter "serial" : '
+    )
+
+    scrape_option_dict = {
+        'scrape_local': {
+            'msg': scrape_local_or_website_msg,
+            'local': True,
+            'website': False
+        },
+        'scrape_multi': {
+            'msg': scrape_serial_or_multi_msg,
+            'multi': True,
+            'serial': False
+        }
+    }
+
+    return_dict = dict()
+
+    for key, values in scrape_option_dict.items():
+        while True:
+            answer = input(values['msg']).lower()
+            check_list = list(values.keys())
+            check_list.remove('msg')
+            if answer in check_list:
+                print(values)
+                return_dict[key] = values[answer]
+                break
+    return return_dict
+
+
+def main_scraper():
+    scrape_timeframe = {1: (1994, 2019), 2: (2000, 2019)}
+
+    s = requests.Session()
+    s.headers.update({
+        'User-Agent': 'Mozilla / 5.0 (Windows NT 10.0; Win64; x64)\
+                           AppleWebKit / 537.36 (KHTML, like Gecko)\
+                           Chrome / 70.0.3538.77 Safari / 537.36'
+    })
+
+    scrape_options = ask_scrape_loc_and_process_options()
 
     # extra_pd will be the final dataframe of the scraping module!
     # it will hold all match data of J1, J2 league starting from
@@ -199,19 +252,11 @@ if __name__ == '__main__':
     extra_data1 = pd.DataFrame(
         columns=[
             'attendance', 'division', 'section', 'round', 'home_team',
-            'away_team', 'broadcasters', 'match_id'])
+            'away_team', 'broadcasters', 'id'])
 
-    s = requests.Session()
-    s.headers.update({
-        'User-Agent': 'Mozilla / 5.0 (Windows NT 10.0; Win64; x64)\
-                           AppleWebKit / 537.36 (KHTML, like Gecko)\
-                           Chrome / 70.0.3538.77 Safari / 537.36'
-    }
-    )
-
-    for opt in (1, 2):
+    for opt in (1, ):
         print(opt)
-        time_frame = scrape_options.pop(opt)
+        time_frame = scrape_timeframe.pop(opt)
         for year in range(time_frame[0], time_frame[1]):
             print(year)
             random_waiter(20, 50)
@@ -221,22 +266,51 @@ if __name__ == '__main__':
 
             ])
 
-    extra_data1.to_csv('extra_data1')
+    extra_data1.applymap(clean_string)
 
-    # extra_data2 = pd.DataFrame(
-    #     columns=[
-    #         'match_id', 'home_team_player_1', 'home_team_player_2',
-    #         'home_team_player_3', 'home_team_player_4', 'home_team_player_5',
-    #         'home_team_player_6', 'home_team_player_7', 'home_team_player_8',
-    #         'home_team_player_9', 'home_team_player_10', 'home_team_player_11',
-    #         'away_team_player_1', 'away_team_player_2',  'away_team_player_3',
-    #         'away_team_player_4', 'away_team_player_5', 'away_team_player_6',
-    #         'away_team_player_7', 'away_team_player_8', 'away_team_player_9',
-    #         'away_team_player_10', 'away_team_player_11', 'stadium_name',
-    #         'weather', 'temperature', 'humidity'
-    #     ]
-    # )
+    extra_data1.to_csv('extra_data1.csv', index=False)
 
-    # data_list_for_extra_list = list()
-    # for match_id in list(extra_data1['match_id']):
-    # data_list_for_extra_list.append(scrape_jleague_match_data2(s, match_id)
+    data_list_for_extra_list = list()
+
+    core_to_use = cpu_count() if scrape_options['scrape_multi'] == True else 1
+
+    p = Pool(core_to_use)
+    print("processing with {} cores".format(core_to_use))
+
+    data_list_for_extra_list = p.starmap(
+        scrape_jleague_match_data2,
+        product((s, ), list(extra_data1['id']))
+    )
+
+    extra_data2 = pd.DataFrame(
+        columns=[
+            'id', 'home_team_player1', 'home_team_player2',
+            'home_team_player3', 'home_team_player4', 'home_team_player5',
+            'home_team_player6', 'home_team_player7', 'home_team_player8',
+            'home_team_player9', 'home_team_player10', 'home_team_player11',
+            'away_team_player1', 'away_team_player2',  'away_team_player3',
+            'away_team_player4', 'away_team_player5', 'away_team_player6',
+            'away_team_player7', 'away_team_player8', 'away_team_player9',
+            'away_team_player10', 'away_team_player11', 'stadium_name',
+            'weather', 'temperature', 'humidity'
+        ],
+        data=data_list_for_extra_list)
+
+    extra_data2.applymap(clean_string)
+
+    extra_data2.to_csv('extra_data2.csv', index=False)
+
+    # now join both dataframe to create a new one, then
+    # separate the pd to make it match the format of the
+    # data given by signate
+
+    combined_data = extra_data1.join(extra_data2.set_index('id'),  on='id')
+
+    del extra_data1
+    del extra_data2
+
+    ex_match_reports = combined_data[[CONSTANTS.MATCH_REPORTS_COLUMNS]]
+    ex_train_test = combined_data[[CONSTANTS.MATCH_COLUMNS]]
+
+    ex_match_reports.to_csv('ex_match_reports.csv')
+    ex_train_test.to_csv('ex_total.csv')
