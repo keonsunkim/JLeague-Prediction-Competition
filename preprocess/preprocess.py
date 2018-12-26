@@ -75,7 +75,7 @@ os.chdir(path)
 # Below are General Functions that written in util.property
 # which will be continuosly called by other
 # functions In alphabetical order
-from utils import *
+from Utils.preprocess_utils import *
 
 
 """
@@ -157,7 +157,7 @@ def load_and_merge_original_data():
     combine['match_date'] = pd.to_datetime(combine['match_date'])
     return combine
 
-combine  = load_and_merge_initial_data()
+combine = load_and_merge_initial_data()
 #######################################################################
 #######################################################################
 ############ STEP 2 Set Extra Data J1, J2 League From 1993 ############
@@ -642,13 +642,13 @@ def add_holiday_feauture(df):
     date_df['is_holiday'] = date_df['description'].notnull().astype(np.int8)
     date_df['is_dayoff'] = date_df['is_Weekend'] + date_df['is_holiday']
 
-<<<<<<< HEAD
-    # Use get_elapsed function from util.py 
-=======
-    # Use get_elapsed function from util.py
->>>>>>> 03c9dbdd547b66098ac87c9ef8283fe32fc6fe2e
-    # and calculate how many days left before next day off and
-    # how many days passed from the last day off
+<< << << < HEAD
+# Use get_elapsed function from util.py
+== == == =
+# Use get_elapsed function from util.py
+>>>>>> > 03c9dbdd547b66098ac87c9ef8283fe32fc6fe2e
+# and calculate how many days left before next day off and
+# how many days passed from the last day off
     fld = 'is_dayoff'
     get_elapsed(fld, 'After')
     date_df = date_df.sort_values('date', ascending=False)
@@ -694,8 +694,8 @@ def set_th_match(df):
     ].rename(columns={'home_team': 'team'})
 
     board2 = df[
-            ['match_Year', 'match_date', 'away_team']
-        ].rename(columns={'away_team': 'team'})
+        ['match_Year', 'match_date', 'away_team']
+    ].rename(columns={'away_team': 'team'})
 
     board1['home_game'] = 1
     board2['away_game'] = 1
@@ -703,7 +703,7 @@ def set_th_match(df):
     board = pd.concat([board1, board2])
     board.sort_values(by='match_date', inplace=True)
     board = reset_index(board)
-    
+
     """
     we had two columns which consists data about the team of the match.
     away_team and home_team. However we set them into the same column
@@ -712,52 +712,54 @@ def set_th_match(df):
 
     board['home_game'] = board['home_game'].fillna(0)
     board['away_game'] = board['away_game'].fillna(0)
-    
+
     new_dataset = pd.DataFrame()
-    
+
     start_year, end_year = board['match_Year'].min(), board['match_Year'].max()
 
-    for year in tqdm_notebook( range(start_year, end_year+1 ) ):
+    for year in tqdm_notebook(range(start_year, end_year + 1)):
 
-        year_df = board[board['match_Year']==year].copy()
+        year_df = board[board['match_Year'] == year].copy()
 
         unique_team = np.unique(year_df['team'])
 
-        for team in tqdm_notebook( unique_team ):
+        for team in tqdm_notebook(unique_team):
             temp = year_df[(year_df['match_Year'] == year)
-                             & (year_df['team'] == team)]
+                           & (year_df['team'] == team)]
 
             for i, row in temp.iterrows():
                 match_date = row['match_date']
-                temp.loc[ i, 'th_game'] = int( len( temp[temp['match_date'] < match_date])  ) + 1 
+                temp.loc[i, 'th_game'] = int(
+                    len(temp[temp['match_date'] < match_date])) + 1
 
             new_dataset = pd.concat([new_dataset, temp])
 
     # for all years in the dataset, count how many games a team had
     # before each game put them in the 'section' column
-    
+
     # Make the home_th_game column
-    drop_cols = ['away_game','home_game','team']
-    
-    df  = df.merge(new_dataset[new_dataset['home_game']==1].drop('match_Year',1) , 
-                   left_on  = ['match_date','home_team'],
-                   right_on = ['match_date','team'], how='left' )
+    drop_cols = ['away_game', 'home_game', 'team']
 
-    df.drop(drop_cols,1, inplace=True)
-    df.rename(columns={'th_game':'home_th_game'}, inplace=True)
-    
+    df = df.merge(new_dataset[new_dataset['home_game'] == 1].drop('match_Year', 1),
+                  left_on=['match_date', 'home_team'],
+                  right_on=['match_date', 'team'], how='left')
+
+    df.drop(drop_cols, 1, inplace=True)
+    df.rename(columns={'th_game': 'home_th_game'}, inplace=True)
+
     # Make the away_th_game column
-    df  = df.merge(new_dataset[new_dataset['away_game']==1].drop('match_Year',1) , 
-              left_on  = ['match_date','away_team'],
-              right_on = ['match_date','team'], how='left' )
+    df = df.merge(new_dataset[new_dataset['away_game'] == 1].drop('match_Year', 1),
+                  left_on=['match_date', 'away_team'],
+                  right_on=['match_date', 'team'], how='left')
 
-    df.drop(drop_cols,1, inplace=True)
-    df.rename(columns={'th_game':'away_th_game'}, inplace=True)
+    df.drop(drop_cols, 1, inplace=True)
+    df.rename(columns={'th_game': 'away_th_game'}, inplace=True)
 
     return df
 
 # Run set_th_match
-combine =set_th_match(combine)
+combine = set_th_match(combine)
+
 
 def set_exp_win_ratio(df):
     """
@@ -966,11 +968,12 @@ def set_exp_win_ratio(df):
 
 # Load populdation data of Japan
 population = pd.read_csv('../add_extra_data/Perfect_population.csv',
-                      usecols=[
-                          'SURVEY YEAR', 'AREA Code', 'AREA',
-                          'A1101_Total population (Both sexes)[person]'
-                      ]
-                      )
+                         usecols=[
+                             'SURVEY YEAR', 'AREA Code', 'AREA',
+                             'A1101_Total population (Both sexes)[person]'
+                         ]
+                         )
+
 
 def preprocess_population(df):
     # Get only population data from 1992 and set the minto integers
@@ -985,39 +988,44 @@ def preprocess_population(df):
 
 # Since we statistics japan does not yet offer data for
 # year 2016 and 2018 we guess the population for the year!
+
+
 def caculate_change_ratio(df, year):
     assert type(year) == int
-    
+
     change_ratio = 1 + (
         df[
-            (df['area'] == 'All Japan') & (df['year'] == year+1)
+            (df['area'] == 'All Japan') & (df['year'] == year + 1)
         ]['population'].values[0]
         - df[(df['area'] == 'All Japan')
-            & (df['year'] == year)]['population'].values[0]
+             & (df['year'] == year)]['population'].values[0]
     ) / df[
         (df['area'] == 'All Japan')
         & (df['year'] == year)
     ]['population'].values[0]
-    
-    last_index= len(df)
-    
+
+    last_index = len(df)
+
     return change_ratio, last_index
 
+
 def insert_unrecored_population_value(df, year, change_ratio, last_index):
-    for ind, x in df[df['year'] == year+1].iterrows():
-        
+    for ind, x in df[df['year'] == year + 1].iterrows():
+
         vals = x['year'] + \
             1, x['area_code'], x['area'], x['population'] * change_ratio
 
         df.loc[last_index] = vals
         last_index += 1
-        
+
     return df
+
 
 def get_nextyear_population(df, year):
     change_ratio, last_index = caculate_change_ratio(df, year)
     df = insert_unrecored_population_value(df, year, change_ratio, last_index)
     return df
+
 
 def make_population_data(df):
     """
@@ -1027,20 +1035,20 @@ def make_population_data(df):
     """
 
     df = preprocess_population(df)
-    df = get_nextyear_population(df,2015)
-    df = get_nextyear_population(df,2016)
+    df = get_nextyear_population(df, 2015)
+    df = get_nextyear_population(df, 2016)
 
     return df
 
+
 def merge_with_population_data(main_df, right_df):
-    df = pd.merge(main_df, right_df, left_on  = ['match_Year','stadium_area_code']
-                                , right_on = ['year', 'area_code']
-                                , how = 'left')
-    df = df.drop(['year','area','area_code'],1)
+    df = pd.merge(main_df, right_df, left_on=[
+                  'match_Year', 'stadium_area_code'], right_on=['year', 'area_code'], how='left')
+    df = df.drop(['year', 'area', 'area_code'], 1)
     return df
 
 population = make_population_data(population)
-combine    = merge_with_population_data(combine, population)
+combine = merge_with_population_data(combine, population)
 #######################################################################
 #######################################################################
 ############## STEP 11 Find Team's League 1 and 2 Years ago ###########
@@ -2133,14 +2141,16 @@ step 20, 21 is not needed to recreate the train data.
 They are Just Simply Not Used
 """
 # Yearly home , stadium's lag attendance
+
+
 def lag_year_hometeam_stadium_feature(df, lags, col):
     temp = df[['match_Year', 'home_team', 'stadium', col]]
     for i in lags:
         shifted = temp.copy()
         shifted.columns = ['match_Year', 'home_team',
-                        'stadium', col + '_Year_Stadium_Lag_' + str(i)]
+                           'stadium', col + '_Year_Stadium_Lag_' + str(i)]
         shifted['match_Year'] += i
-                
+
         shifted = shifted.groupby(
             ['match_Year', 'home_team', 'stadium']
         )[col + '_Year_Stadium_Lag_' + str(i)].mean().reset_index()
@@ -2153,14 +2163,16 @@ def lag_year_hometeam_stadium_feature(df, lags, col):
     return df
 
 # Yearly, Monthly home, away's lag attendance
+
+
 def lag_year_hometeam_awayteam_feature(df, lags, col):
     temp = df[['match_Year', 'home_team', 'away_team', col]]
     for i in lags:
         shifted = temp.copy()
         shifted.columns = ['match_Year', 'home_team',
-                        'away_team', col + '_Year_Hometeam_Awayteam_Lag_' + str(i)]
+                           'away_team', col + '_Year_Hometeam_Awayteam_Lag_' + str(i)]
         shifted['match_Year'] += i
-                
+
         shifted = shifted.groupby(
             ['match_Year', 'home_team', 'away_team']
         )[col + '_Year_Hometeam_Awayteam_Lag_' + str(i)].mean().reset_index()
@@ -2172,24 +2184,26 @@ def lag_year_hometeam_awayteam_feature(df, lags, col):
         )
     return df
 
+
 def lag_year_month_hometeam_awayteam_feature(df, lags, col):
-    temp = df[['match_Year','match_Month','home_team', 'away_team', col]]
+    temp = df[['match_Year', 'match_Month', 'home_team', 'away_team', col]]
     for i in lags:
         shifted = temp.copy()
-        shifted.columns = ['match_Year', 'match_Month','home_team',
-                        'away_team', col + '_Year_Month_Hometeam_Awayteam_Lag_' + str(i)]
+        shifted.columns = ['match_Year', 'match_Month', 'home_team',
+                           'away_team', col + '_Year_Month_Hometeam_Awayteam_Lag_' + str(i)]
         shifted['match_Year'] += i
-        
+
         shifted = shifted.groupby(
-            ['match_Year', 'match_Month','home_team', 'away_team']
+            ['match_Year', 'match_Month', 'home_team', 'away_team']
         )[col + '_Year_Month_Hometeam_Awayteam_Lag_' + str(i)].mean().reset_index()
 
         df = pd.merge(
             df, shifted,
-            on=['match_Year','match_Month', 'home_team', 'away_team'],
+            on=['match_Year', 'match_Month', 'home_team', 'away_team'],
             how='left'
         )
     return df
+
 
 def make_lagged_feature(df, lags):
     df = lag_year_hometeam_awayteam_feature(df, lags, 'attendance')
@@ -2198,18 +2212,17 @@ def make_lagged_feature(df, lags):
 
     return df
 
-combine = make_lagged_feature(combine, [1,2,3,4])
+combine = make_lagged_feature(combine, [1, 2, 3, 4])
 
 
-
-######################################################################################
-######################################################################################
-######################################################################################
-######################################################################################
-######################################################################################
-######################################################################################
-######################################################################################
-######################################################################################
+##########################################################################
+##########################################################################
+##########################################################################
+##########################################################################
+##########################################################################
+##########################################################################
+##########################################################################
+##########################################################################
 
 def put_all_data_together(google_map_key):
 

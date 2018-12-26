@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 from bs4 import BeautifulSoup
 
-from .scrape_utils import (
+from Utils.scrape_utils import (
     random_waiter, check_and_find_html_elements,
     clean_string, connection_checker
 )
